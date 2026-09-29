@@ -182,6 +182,7 @@ export class ShooterScene implements GameScene {
           this.closePause();
           this.quitToTitle();
         },
+        jumpToCockpit: (strike) => this.jumpToCockpit(strike),
         toggleSound: () => audio.engine.toggleMuted(),
         toggleEffects: () => {
           fx.setQuality(fx.quality === 'high' ? 'low' : 'high');
@@ -352,13 +353,7 @@ export class ShooterScene implements GameScene {
         if (this.phaseTime > WAVE_CLEAR_PAUSE && !this.isStrikeWave) {
           this.startNextWave();
         } else if (this.phaseTime > WAVE_CLEAR_PAUSE) {
-          this.setPhase('toCockpit');
-          this.director.enterCockpit();
-          this.audio.sfx.flyIn(COCKPIT.enterDuration);
-          this.setMusicCutoff(450, COCKPIT.enterDuration * 0.8);
-          const pf = this.playfield;
-          const strike = this.spawner.wave / COCKPIT.everyWaves;
-          this.cockpit.start(this.player.x, this.player.y, strike, pf.widthPx / pf.heightPx);
+          this.enterCockpit();
         }
         break;
 
@@ -390,6 +385,31 @@ export class ShooterScene implements GameScene {
         }
         break;
     }
+  }
+
+  private enterCockpit(): void {
+    this.setPhase('toCockpit');
+    this.director.enterCockpit();
+    this.audio.sfx.flyIn(COCKPIT.enterDuration);
+    this.setMusicCutoff(450, COCKPIT.enterDuration * 0.8);
+    const pf = this.playfield;
+    const strike = this.spawner.wave / COCKPIT.everyWaves;
+    this.cockpit.start(this.player.x, this.player.y, strike, pf.widthPx / pf.heightPx);
+  }
+
+  /** Testing shortcut (pause menu): skip straight to cockpit strike `strike` of the current game. */
+  private jumpToCockpit(strike: number): void {
+    this.closePause();
+    this.tutorial.cancel();
+    this.clearWorld();
+    this.cockpit.clear();
+    this.director.reset();
+    this.hud.hideMessage();
+    this.messageTimer = 0;
+    this.invulnerable = 1;
+    this.spawner.wave = strike * COCKPIT.everyWaves;
+    this.placePlayerAtStart();
+    this.enterCockpit();
   }
 
   private get isStrikeWave(): boolean {
@@ -565,7 +585,6 @@ export class ShooterScene implements GameScene {
     this.player.object.visible = false;
     this.messageTimer = 0;
     this.cockpit.clear();
-    if (this.director.blend > 0) this.director.exitCockpit(1.2);
     this.audio.music.stop(1.5);
     this.audio.sfx.gameOver();
     if (this.score > this.hiScore) {

@@ -886,6 +886,26 @@ body {
   opacity: 0.6;
 }
 
+.menu-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: rgb(232 236 245 / 70%);
+}
+
+.menu-row span {
+  flex: 1;
+}
+
+.menu-button.small {
+  min-height: 38px;
+  min-width: 38px;
+  padding: 0 8px;
+  font-size: 14px;
+}
+
 .menu-button.primary {
   border-color: transparent;
   background: linear-gradient(180deg, #6ff3ff, #3b7bff);

@@ -7,7 +7,11 @@ export interface PauseMenuActions {
   /** Toggles post-processing quality; returns the new setting. */
   toggleEffects: () => 'high' | 'low';
   resetTutorials: () => void;
+  /** Testing shortcut: jump to cockpit strike N (1-based). */
+  jumpToCockpit: (strike: number) => void;
 }
+
+const TEST_STRIKES = 5;
 
 /** Pause button (during play) and the modal pause menu. */
 export class PauseMenu {
@@ -52,6 +56,7 @@ export class PauseMenu {
       this.soundButton,
       this.effectsButton,
       this.tutorialButton,
+      testRow(actions.jumpToCockpit),
       menuButton('Quit to title', actions.quit),
       credits(),
     );
@@ -98,6 +103,21 @@ function credits(): HTMLDivElement {
   c.textContent =
     'Cockpit model by Ville Seppanen (Osmic), CC-BY 3.0 · Ship models by Quaternius, CC0 · Music & sound synthesized in-game';
   return c;
+}
+
+/** Row of small buttons that jump to each cockpit strike level. */
+function testRow(jump: (strike: number) => void): HTMLDivElement {
+  const row = document.createElement('div');
+  row.className = 'menu-row';
+  const label = document.createElement('span');
+  label.textContent = 'Cockpit test';
+  row.append(label);
+  for (let i = 1; i <= TEST_STRIKES; i++) {
+    const b = menuButton(String(i), () => jump(i));
+    b.classList.add('small');
+    row.append(b);
+  }
+  return row;
 }
 
 function menuButton(label: string, onClick: () => void, variant?: 'primary'): HTMLButtonElement {

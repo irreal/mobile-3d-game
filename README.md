@@ -104,6 +104,9 @@ The fight is a **rhythm game locked to the cockpit music** (146 BPM):
 - **Pause** with the pause button (bottom-right, during play), Esc or P. The game also pauses when
   the tab/app goes to the background. The menu has Resume, Restart, Sound on/off, Effects
   High/Low, Show tutorials again, and Quit to title.
+- **Cockpit test** (pause menu, for testing): buttons 1–5 jump straight into that cockpit strike
+  level of the current game (the fly-in plays, then the squadron for that strike).
+- Dying in the cockpit keeps the first-person view for the game-over screen.
 - **Tutorials:** a quick "How to fly" card at the start of each game, and a "Cockpit strike" card the
   first time you enter the cockpit in each game. From the third time a card is shown, it offers
   a *Don't show again* checkbox. Show counts and opt-outs are stored in `localStorage`
