@@ -1,7 +1,7 @@
-import { ACESFilmicToneMapping, PCFShadowMap, PerspectiveCamera, SRGBColorSpace, WebGLRenderer } from 'three';
-import type { Scene } from 'three';
+import { ACESFilmicToneMapping, PCFShadowMap, PerspectiveCamera, Scene, SRGBColorSpace, WebGLRenderer } from 'three';
 import { config } from '../config.ts';
 import { GameLoop } from './GameLoop.ts';
+import { PostFx } from './PostFx.ts';
 import { observeViewport, preventDefaultGestures } from './viewport.ts';
 
 export interface GameScene {
@@ -12,11 +12,12 @@ export interface GameScene {
   dispose?(): void;
 }
 
-/** Owns the renderer, camera and loop; renders whichever `GameScene` is active. */
+/** Owns the renderer, camera, post-processing and loop; renders whichever `GameScene` is active. */
 export class Engine {
   readonly renderer: WebGLRenderer;
   readonly camera: PerspectiveCamera;
   readonly canvas: HTMLCanvasElement;
+  readonly fx: PostFx;
 
   private readonly loop: GameLoop;
   private readonly stopObservingViewport: () => void;
@@ -31,6 +32,7 @@ export class Engine {
     });
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.1;
     this.renderer.shadowMap.enabled = config.shadows;
     this.renderer.shadowMap.type = PCFShadowMap;
 
@@ -39,6 +41,10 @@ export class Engine {
     container.appendChild(this.canvas);
 
     this.camera = new PerspectiveCamera(config.camera.fov, 1, config.camera.near, config.camera.far);
+    this.fx = new PostFx(this.renderer, new Scene(), this.camera);
+    this.fx.onQualityChange(() => {
+      this.needsResize = true;
+    });
 
     preventDefaultGestures(this.canvas);
     this.stopObservingViewport = observeViewport(container, () => {
@@ -51,6 +57,7 @@ export class Engine {
   setScene(scene: GameScene): void {
     this.activeScene?.dispose?.();
     this.activeScene = scene;
+    this.fx.setScene(scene.scene, this.camera);
     this.needsResize = true;
   }
 
@@ -68,6 +75,7 @@ export class Engine {
     this.loop.dispose();
     this.stopObservingViewport();
     this.activeScene?.dispose?.();
+    this.fx.dispose();
     this.renderer.dispose();
     this.canvas.remove();
   }
@@ -76,7 +84,8 @@ export class Engine {
     if (!this.activeScene) return;
     if (this.needsResize) this.resize();
     this.activeScene.update(dt, elapsed);
-    this.renderer.render(this.activeScene.scene, this.camera);
+    if (this.fx.enabled) this.fx.render(dt);
+    else this.renderer.render(this.activeScene.scene, this.camera);
     this.frameListeners.forEach((fn) => fn(dt));
   };
 
@@ -86,9 +95,12 @@ export class Engine {
     const height = Math.max(1, this.container.clientHeight);
     const aspect = width / height;
 
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, config.maxPixelRatio));
+    const maxRatio = this.fx.enabled ? config.maxPixelRatioFx : config.maxPixelRatio;
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, maxRatio);
+    this.renderer.setPixelRatio(pixelRatio);
     // `false`: CSS owns the canvas' display size; only resize the drawing buffer.
     this.renderer.setSize(width, height, false);
+    if (this.fx.enabled) this.fx.setSize(width, height, pixelRatio);
 
     this.camera.aspect = aspect;
     this.camera.updateProjectionMatrix();

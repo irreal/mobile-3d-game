@@ -4,6 +4,8 @@ export interface PauseMenuActions {
   restart: () => void;
   quit: () => void;
   toggleSound: () => boolean;
+  /** Toggles post-processing quality; returns the new setting. */
+  toggleEffects: () => 'high' | 'low';
   resetTutorials: () => void;
 }
 
@@ -12,10 +14,11 @@ export class PauseMenu {
   private readonly button: HTMLButtonElement;
   private readonly modal: HTMLDivElement;
   private readonly soundButton: HTMLButtonElement;
+  private readonly effectsButton: HTMLButtonElement;
   private readonly tutorialButton: HTMLButtonElement;
   private open = false;
 
-  constructor(overlay: HTMLElement, actions: PauseMenuActions, muted: boolean) {
+  constructor(overlay: HTMLElement, actions: PauseMenuActions, muted: boolean, effects: 'high' | 'low') {
     this.button = document.createElement('button');
     this.button.type = 'button';
     this.button.className = 'hud-pause';
@@ -36,6 +39,7 @@ export class PauseMenu {
     title.textContent = 'PAUSED';
 
     this.soundButton = menuButton('', () => this.renderSound(actions.toggleSound()));
+    this.effectsButton = menuButton('', () => this.renderEffects(actions.toggleEffects()));
     this.tutorialButton = menuButton('Show tutorials again', () => {
       actions.resetTutorials();
       this.tutorialButton.textContent = 'Tutorials reset ✓';
@@ -46,6 +50,7 @@ export class PauseMenu {
       menuButton('Resume', actions.resume, 'primary'),
       menuButton('Restart', actions.restart),
       this.soundButton,
+      this.effectsButton,
       this.tutorialButton,
       menuButton('Quit to title', actions.quit),
     );
@@ -53,6 +58,7 @@ export class PauseMenu {
     this.modal.addEventListener('pointerdown', (e) => e.stopPropagation());
     overlay.append(this.button, this.modal);
     this.renderSound(muted);
+    this.renderEffects(effects);
   }
 
   get isOpen(): boolean {
@@ -77,6 +83,10 @@ export class PauseMenu {
 
   renderSound(muted: boolean): void {
     this.soundButton.textContent = muted ? 'Sound: Off' : 'Sound: On';
+  }
+
+  renderEffects(quality: 'high' | 'low'): void {
+    this.effectsButton.textContent = quality === 'high' ? 'Effects: High' : 'Effects: Low (faster)';
   }
 }
 

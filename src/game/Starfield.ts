@@ -1,4 +1,24 @@
-import { BufferAttribute, BufferGeometry, Points, PointsMaterial } from 'three';
+import { AdditiveBlending, BufferAttribute, BufferGeometry, CanvasTexture, Points, PointsMaterial } from 'three';
+import type { Texture } from 'three';
+
+let sharedStarTexture: Texture | null = null;
+
+/** Soft round dot, so stars aren't square points. */
+function starTexture(): Texture {
+  if (sharedStarTexture) return sharedStarTexture;
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.25, 'rgba(255,255,255,0.8)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  sharedStarTexture = new CanvasTexture(canvas);
+  return sharedStarTexture;
+}
 
 interface Layer {
   points: Points;
@@ -15,9 +35,9 @@ export class Starfield {
 
   constructor() {
     const specs = [
-      { count: 350, z: -45, size: 0.18, speed: 0.35, color: 0x7788bb },
-      { count: 220, z: -25, size: 0.22, speed: 0.6, color: 0xaab8e8 },
-      { count: 90, z: -8, size: 0.14, speed: 1, color: 0xffffff },
+      { count: 350, z: -45, size: 0.18, speed: 0.35, color: 0x7788bb, glow: 1 },
+      { count: 220, z: -25, size: 0.22, speed: 0.6, color: 0xaab8e8, glow: 1.4 },
+      { count: 90, z: -8, size: 0.14, speed: 1, color: 0xffffff, glow: 2.2 },
     ];
     for (const spec of specs) {
       const positions = new Float32Array(spec.count * 3);
@@ -28,10 +48,17 @@ export class Starfield {
       }
       const geometry = new BufferGeometry();
       geometry.setAttribute('position', new BufferAttribute(positions, 3));
-      const points = new Points(
-        geometry,
-        new PointsMaterial({ color: spec.color, size: spec.size, sizeAttenuation: true, depthWrite: false }),
-      );
+      const material = new PointsMaterial({
+        color: spec.color,
+        size: spec.size * 2.2,
+        sizeAttenuation: true,
+        depthWrite: false,
+        map: starTexture(),
+        transparent: true,
+        blending: AdditiveBlending,
+      });
+      material.color.multiplyScalar(spec.glow);
+      const points = new Points(geometry, material);
       points.frustumCulled = false;
       this.layers.push({ points, positions, speed: spec.speed });
     }

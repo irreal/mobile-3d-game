@@ -81,8 +81,8 @@ squadron drops out of warp right in front of you and you fight it in first perso
 ## Menus, tutorials and version
 
 - **Pause** with the pause button (bottom-right, during play), Esc or P. The game also pauses when
-  the tab/app goes to the background. The menu has Resume, Restart, Sound on/off, Show tutorials
-  again, and Quit to title.
+  the tab/app goes to the background. The menu has Resume, Restart, Sound on/off, Effects
+  High/Low, Show tutorials again, and Quit to title.
 - **Tutorials:** a quick "How to fly" card at the start of each game, and a "Cockpit strike" card the
   first time you enter the cockpit in each game. From the third time a card is shown, it offers
   a *Don't show again* checkbox. Show counts and opt-outs are stored in `localStorage`
@@ -90,6 +90,26 @@ squadron drops out of warp right in front of you and you fight it in first perso
 - **Version:** bottom-left shows `v<package.json version> · <commit>`. Both are injected at build
   time by `vite.config.ts` (the commit comes from `GITHUB_SHA` in CI, or `git` locally). Bump
   `version` in `package.json` for releases.
+
+## Graphics
+
+- **Ships:** the player ship and enemies come from Quaternius'
+  [Ultimate Spaceships pack](https://quaternius.com/packs/ultimatespaceships.html) (CC0, public
+  domain; license in `public/assets/ships/`). The player flies the blue *Challenger*; the enemy
+  faction flies red ships: *Bob* (grunt), *Dispatcher* (weaver) and *Pancake* (heavy). The OBJ
+  sources were converted to GLB (`obj2gltf` + `gltf-transform weld`) with textures downscaled to
+  512–1024 px JPEG. `loadShipModels()` in `models.ts` loads them at startup and bakes orientation
+  and size into the geometry; if loading fails, the old procedural models are used.
+- **Post-processing** (`src/core/PostFx.ts`): an HDR render target with MSAA, bloom
+  (`UnrealBloomPass` at half resolution), and a custom final shader with zoom blur (camera fly-in/out),
+  chromatic aberration (hits, big explosions), screen-space shockwave ripples, a cool desaturated
+  tint during Focus, vignette and film grain, then tone mapping.
+- **Effects:** soft camera-facing glow sprites (`glow.ts`) for sparks, explosion flashes, enemy
+  bullets, orbs and engine glows; chunky debris; expanding shock rings; a procedural nebula sky
+  dome (`Nebula.ts`) and round glowing stars.
+- **Effects: Low** in the pause menu renders straight to the screen (no post-processing) for
+  slower phones; the choice is saved in `localStorage` (`nova-strike:fx`). With effects on,
+  the pixel ratio is capped at 1.5 (`config.maxPixelRatioFx`).
 
 ## Audio
 
@@ -103,13 +123,14 @@ Mobile browsers only allow audio after a user gesture, so sound starts with the 
 
 ```
 index.html                 Mobile viewport meta, #app mount point
-public/                    Static files copied as-is (favicon, web app manifest)
+public/                    Static files copied as-is (favicon, web app manifest, ship models)
 src/
   main.ts                  Bootstraps engine, input, HUD and the game scene
   config.ts                Engine tunables: pixel-ratio cap, camera, antialias
   style.css                Full-screen canvas, gesture blocking, HUD styles
   core/
     Engine.ts              WebGLRenderer + camera, resize handling, active GameScene
+    PostFx.ts              Bloom + final shader (zoom blur, aberration, shockwaves, vignette)
     GameLoop.ts            setAnimationLoop wrapper, clamped delta, pauses when hidden
     viewport.ts            Resize/orientation observers, default touch gesture blocking
   input/
@@ -123,9 +144,11 @@ src/
     Enemy.ts               Enemy types, stats, movement and firing patterns
     WaveSpawner.ts         Formations and difficulty ramp over time
     InstancedPool.ts       Instanced-mesh pool for bullets/particles (1 draw call each)
-    Effects.ts             Explosion particles
+    Effects.ts             Glow sparks, debris, flashes and shock rings
+    glow.ts                Camera-facing additive glow sprite shader
+    Nebula.ts              Procedural nebula sky dome
     Starfield.ts           Parallax scrolling stars
-    models.ts              Procedural placeholder models (ship, aliens, power-up)
+    models.ts              GLB ship loading (with procedural fallbacks), power-up model
     CameraDirector.ts      Camera pose: top-down ↔ cockpit fly-in/out transition, shake
     CockpitSection.ts      First-person strike: squadron, orbs, lock-on painting, homing rockets
     WarpField.ts           Speed-line streaks shown in first person

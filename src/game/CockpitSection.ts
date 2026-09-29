@@ -1,4 +1,4 @@
-import { AdditiveBlending, MathUtils, Mesh, MeshBasicMaterial, Vector3 } from 'three';
+import { AdditiveBlending, Color, MathUtils, Mesh, MeshBasicMaterial, Vector3 } from 'three';
 import type { PerspectiveCamera, Scene } from 'three';
 import type { Sfx } from '../audio/Sfx.ts';
 import type { CockpitOverlay, LockMarker } from '../ui/CockpitOverlay.ts';
@@ -6,6 +6,7 @@ import { COCKPIT } from './constants.ts';
 import type { Effects } from './Effects.ts';
 import { ENEMY_STATS } from './Enemy.ts';
 import type { EnemyKind } from './Enemy.ts';
+import { createGlowMaterial, glowGeometry } from './glow.ts';
 import { disposeModel, sharedGeometries } from './models.ts';
 import type { Model } from './models.ts';
 
@@ -79,11 +80,15 @@ export interface CockpitFrame {
 export interface CockpitCallbacks {
   addScore: (points: number) => void;
   playerHit: () => void;
+  /** Big explosion at a world position (screen shockwave etc.), strength ~0..1.5. */
+  blast: (position: Vector3, strength: number) => void;
 }
 
 const COCKPIT_SCORE: Record<EnemyKind, number> = { grunt: 200, weaver: 250, tank: 1200 };
 const FIGHTER_HP: Record<EnemyKind, number> = { grunt: 1, weaver: 2, tank: 6 };
 const FIGHTER_SCALE = 1.4;
+/** Pitch toward the cockpit so the ships show their top silhouette while facing you. */
+const FIGHTER_PITCH = 0.95;
 /** Seconds a fighter takes to drop out of warp into its hover spot. */
 const WARP_IN_TIME = 0.8;
 /** How far ahead fighters start their warp exit. */
@@ -92,9 +97,9 @@ const WARP_FLASH_COLORS = [0x9fe8ff, 0xffffff, 0x6ff3ff];
 const ORB_RADIUS = 0.32;
 const ORB_COLORS = [0xff4f8b, 0xffffff];
 const EXPLOSION_COLORS: Record<EnemyKind, readonly number[]> = {
-  grunt: [0x57e389, 0xc04dff, 0xffffff, 0xffa040],
-  weaver: [0xffb443, 0xff5a36, 0xffffff],
-  tank: [0x9b5cff, 0xffe14d, 0xff5a36, 0xffffff],
+  grunt: [0xff5a36, 0xffb443, 0xffffff, 0xff2d55],
+  weaver: [0xff2d55, 0xffb443, 0xffffff],
+  tank: [0xff5a36, 0xffe14d, 0xff2d55, 0xffffff, 0x9fe8ff],
 };
 const UP = new Vector3(0, 1, 0);
 const tmp = new Vector3();
@@ -114,16 +119,11 @@ export class CockpitSection {
   private readonly rockets: Rocket[] = [];
   private readonly launchQueue: { target: Lockable; volley: Volley }[] = [];
   private readonly markers: LockMarker[] = [];
-  private readonly orbMaterial = new MeshBasicMaterial({
-    color: 0xff4f8b,
-    transparent: true,
-    blending: AdditiveBlending,
-    depthWrite: false,
-  });
-  private readonly rocketMaterial = new MeshBasicMaterial({ color: 0xfff1c9 });
-  private readonly overchargedMaterial = new MeshBasicMaterial({ color: 0xffd23d });
+  private readonly orbMaterial = createGlowMaterial({ size: 1.5, intensity: 2.4, core: 0.35, color: [1, 0.3, 0.55] });
+  private readonly rocketMaterial = new MeshBasicMaterial({ color: new Color(0xfff1c9).multiplyScalar(2) });
+  private readonly overchargedMaterial = new MeshBasicMaterial({ color: new Color(0xffd23d).multiplyScalar(2.5) });
   private readonly streakMaterial = new MeshBasicMaterial({
-    color: 0x9fe8ff,
+    color: new Color(0x9fe8ff).multiplyScalar(1.8),
     transparent: true,
     opacity: 0.85,
     blending: AdditiveBlending,
@@ -330,8 +330,7 @@ export class CockpitSection {
   private spawnFighter(kind: EnemyKind, start: Vector3, hover: Vector3, delay: number, round: number): void {
     const model = ENEMY_STATS[kind].create();
     model.object.scale.setScalar(FIGHTER_SCALE);
-    // Models are built facing +z (the top-down camera); turn them toward the cockpit.
-    model.object.rotation.x = Math.PI / 2;
+    model.object.rotation.x = FIGHTER_PITCH;
     model.object.position.copy(start);
     model.object.visible = false;
     this.scene.add(model.object);
@@ -395,8 +394,7 @@ export class CockpitSection {
       }
 
       const obj = f.model.object;
-      if (f.kind === 'grunt') obj.rotation.y += dt * 2;
-      else obj.rotation.y = Math.sin(f.age * 2 + f.phase) * 0.4;
+      obj.rotation.y = Math.sin(f.age * (f.kind === 'weaver' ? 2.4 : 1.6) + f.phase) * 0.45;
 
       if (f.flash > 0) {
         f.flash -= dt;
@@ -415,13 +413,14 @@ export class CockpitSection {
   /** Stretches the fighter and its streak along the flight path while it decelerates. */
   private updateWarpIn(f: Fighter, arrive: number): void {
     const speed = (1 - arrive) ** 4;
-    // Models are rotated so local z is the world y axis (the line of sight).
-    f.model.object.scale.set(FIGHTER_SCALE, FIGHTER_SCALE, FIGHTER_SCALE * (1 + speed * 10));
+    // Stretch along the ship's nose axis, which points (mostly) down the line of sight.
+    f.model.object.scale.set(FIGHTER_SCALE, FIGHTER_SCALE * (1 + speed * 10), FIGHTER_SCALE);
 
     if (!f.warpedIn && arrive > 0.55) {
       f.warpedIn = true;
       const p = f.position;
       this.effects.explode(p.x, p.y, WARP_FLASH_COLORS, 16, 7, 0.4, p.z);
+      this.effects.ring(p.x, p.y, p.z, 0x9fe8ff, 2.6, 0.4, true);
       this.sfx.warpIn();
     }
 
@@ -445,8 +444,7 @@ export class CockpitSection {
       tmp.copy(eye);
       if (s > 0) tmp.x += (s === 1 ? -1 : 1) * 2.5;
       const velocity = tmp.sub(f.position).normalize().multiplyScalar(speed).clone();
-      const mesh = new Mesh(sharedGeometries.enemyBullet, this.orbMaterial);
-      mesh.scale.setScalar(ORB_RADIUS / 0.22);
+      const mesh = new Mesh(glowGeometry, this.orbMaterial);
       mesh.position.copy(f.position);
       this.scene.add(mesh);
       this.orbs.push({
@@ -471,7 +469,7 @@ export class CockpitSection {
       const orb = this.orbs[i]!;
       orb.age += dt;
       orb.position.addScaledVector(orb.velocity, dt);
-      orb.mesh.scale.setScalar((ORB_RADIUS / 0.22) * (1 + Math.sin(orb.age * 16) * 0.12));
+      orb.mesh.scale.setScalar(1 + Math.sin(orb.age * 16) * 0.15);
 
       const reachedCockpit = orb.position.distanceTo(frame.eye) < 1.1;
       const passed = orb.position.y < frame.eye.y - 2;
@@ -605,6 +603,8 @@ export class CockpitSection {
     if (!volley.overcharged) return;
 
     this.effects.explode(center.x, center.y, [0xffd23d, 0xffffff, 0xff8a3d], 30, 14, 0.5, center.z);
+    this.effects.ring(center.x, center.y, center.z, 0xffd23d, COCKPIT.overchargeRadius * 2, 0.5, true);
+    this.callbacks.blast(center, 0.6);
     const r2 = COCKPIT.overchargeRadius ** 2;
     const splashed = [...this.lockables()].filter((t) => t.position.distanceToSquared(center) < r2);
     for (const t of splashed) this.damage(t, volley);
@@ -646,6 +646,8 @@ export class CockpitSection {
     }
     const big = fighter.kind === 'tank';
     this.effects.explode(p.x, p.y, EXPLOSION_COLORS[fighter.kind], big ? 70 : 28, big ? 12 : 8, big ? 1 : 0.7, p.z);
+    this.effects.ring(p.x, p.y, p.z, big ? 0xffb443 : 0xff5a36, big ? 9 : 4.5, big ? 0.6 : 0.4, true);
+    if (big) this.callbacks.blast(p, 1);
     navigator.vibrate?.(big ? 40 : 15);
     this.sfx.explosion(big ? 'big' : 'small');
     this.removeFighterModel(fighter);

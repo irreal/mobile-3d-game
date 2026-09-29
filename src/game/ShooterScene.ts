@@ -7,8 +7,10 @@ import {
   MeshBasicMaterial,
   PointLight,
   Scene,
+  Vector3,
 } from 'three';
 import type { PerspectiveCamera } from 'three';
+import type { PostFx } from '../core/PostFx.ts';
 import type { GameAudio } from '../audio/GameAudio.ts';
 import { LOCK_ON, NOVA_DRIVE } from '../audio/songs.ts';
 import type { GameScene } from '../core/Engine.ts';
@@ -31,6 +33,7 @@ import {
   POWERUP,
 } from './constants.ts';
 import { Effects } from './Effects.ts';
+import { createGlowMaterial, glowGeometry } from './glow.ts';
 import { Enemy } from './Enemy.ts';
 import type { EnemyContext, EnemyKind } from './Enemy.ts';
 import { InstancedPool } from './InstancedPool.ts';
@@ -38,6 +41,7 @@ import { createPowerup, disposeModel, sharedGeometries } from './models.ts';
 import type { Model } from './models.ts';
 import { Playfield } from './Playfield.ts';
 import { PlayerShip } from './PlayerShip.ts';
+import { Nebula } from './Nebula.ts';
 import { Starfield } from './Starfield.ts';
 import { WarpField } from './WarpField.ts';
 import { WaveSpawner } from './WaveSpawner.ts';
@@ -68,11 +72,12 @@ interface Powerup {
 }
 
 const ENEMY_COLORS: Record<EnemyKind, readonly number[]> = {
-  grunt: [0x57e389, 0xc04dff, 0xffffff],
-  weaver: [0xffb443, 0xff5a36, 0xffffff],
-  tank: [0x9b5cff, 0xffe14d, 0xff5a36, 0xffffff],
+  grunt: [0xff5a36, 0xffb443, 0xffffff],
+  weaver: [0xff2d55, 0xffb443, 0xffffff],
+  tank: [0xff5a36, 0xffe14d, 0xff2d55, 0xffffff],
 };
-const PLAYER_COLORS = [0xdfe7ff, 0x3b7bff, 0xff6a3d, 0xffa040];
+const PLAYER_COLORS = [0xdfe7ff, 0x3b7bff, 0x6ff3ff, 0xffa040];
+const PLAYER_BULLET_COLOR = new Color(0x7ff6ff).multiplyScalar(1.9);
 
 /** Offsets and angles (degrees) of the player's shots per weapon level. */
 const WEAPON_PATTERNS: readonly (readonly [number, number])[][] = [
@@ -105,17 +110,18 @@ export class ShooterScene implements GameScene {
 
   private readonly playfield = new Playfield();
   private readonly starfield = new Starfield();
-  private readonly effects = new Effects();
+  private readonly nebula = new Nebula();
+  private readonly effects = new Effects(this.scene);
   private readonly spawner = new WaveSpawner();
   private readonly player = new PlayerShip();
   private readonly playerBullets = new InstancedPool(
     sharedGeometries.playerBullet,
-    new MeshBasicMaterial({ color: 0x7ff6ff, transparent: true, blending: AdditiveBlending, depthWrite: false }),
+    new MeshBasicMaterial({ color: PLAYER_BULLET_COLOR, transparent: true, blending: AdditiveBlending, depthWrite: false }),
     160,
   );
   private readonly enemyBullets = new InstancedPool(
-    sharedGeometries.enemyBullet,
-    new MeshBasicMaterial({ color: 0xff4f8b, transparent: true, blending: AdditiveBlending, depthWrite: false }),
+    glowGeometry,
+    createGlowMaterial({ size: 1.05, intensity: 2.2, core: 0.4, color: [1, 0.3, 0.55] }),
     400,
   );
   private readonly enemies: Enemy[] = [];
@@ -148,6 +154,8 @@ export class ShooterScene implements GameScene {
   private wasFocusing = false;
   /** Last requested music cutoff, restored after pausing. */
   private musicCutoff = 20000;
+  private prevBlend = 0;
+  private plumeTimer = 0;
   private readonly hud: Hud;
   private readonly cockpitOverlay: CockpitOverlay;
   private readonly pauseMenu: PauseMenu;
@@ -158,6 +166,7 @@ export class ShooterScene implements GameScene {
     private readonly input: Input,
     private readonly audio: GameAudio,
     ui: GameUi,
+    private readonly fx: PostFx,
   ) {
     this.hud = ui.hud;
     this.cockpitOverlay = ui.cockpit;
@@ -177,9 +186,14 @@ export class ShooterScene implements GameScene {
           this.quitToTitle();
         },
         toggleSound: () => audio.engine.toggleMuted(),
+        toggleEffects: () => {
+          fx.setQuality(fx.quality === 'high' ? 'low' : 'high');
+          return fx.quality;
+        },
         resetTutorials: () => this.tutorial.store.reset(),
       },
       audio.engine.muted,
+      fx.quality,
     );
     audio.engine.onMuteChange((muted) => this.pauseMenu.renderSound(muted));
     input.onKey('Escape', () => (this.paused ? this.resume() : this.pause()));
@@ -189,19 +203,20 @@ export class ShooterScene implements GameScene {
     });
 
     this.scene.background = new Color(0x05060f);
-    this.scene.add(new HemisphereLight(0xb8c8ff, 0x1a1030, 1.4));
-    const key = new DirectionalLight(0xffffff, 2.2);
+    this.scene.add(new HemisphereLight(0xc4d2ff, 0x2a1840, 2.2));
+    const key = new DirectionalLight(0xffffff, 3);
     key.position.set(4, 6, 10);
     this.scene.add(key);
     // The key light comes from ahead of the ship, so fighters would be backlit in first person.
     this.cockpitFill.position.set(0, -1, 0.6);
     this.scene.add(this.cockpitFill);
-    const engineGlow = new PointLight(0xff8a3d, 6, 6, 1.5);
+    const engineGlow = new PointLight(0xff8a3d, 2, 4, 1.5);
     engineGlow.position.set(0, -1.4, 0.8);
     this.player.object.add(engineGlow);
 
+    this.scene.add(this.nebula.mesh);
     for (const layer of this.starfield.layers) this.scene.add(layer.points);
-    this.scene.add(this.player.object, this.playerBullets.mesh, this.enemyBullets.mesh, this.effects.particles.mesh);
+    this.scene.add(this.player.object, this.playerBullets.mesh, this.enemyBullets.mesh);
     this.scene.add(this.warp.object);
 
     this.cockpit = new CockpitSection(this.scene, this.effects, cockpitOverlay, audio.sfx, {
@@ -209,6 +224,7 @@ export class ShooterScene implements GameScene {
         this.score += points;
       },
       playerHit: () => this.damagePlayer(),
+      blast: (position, strength) => this.blast(position, strength),
     });
     cockpitOverlay.setOpacity(0);
 
@@ -274,7 +290,8 @@ export class ShooterScene implements GameScene {
 
     this.invulnerable = Math.max(0, this.invulnerable - dt);
     this.player.sync(dt, this.invulnerable);
-    this.effects.update(dt);
+    this.updateEnginePlume(dt);
+    this.effects.update(dt, this.camera);
     const blend = this.director.blend;
     this.cockpitFill.intensity = 2.6 * blend;
     this.starfield.update(dt, playing ? MathUtils.lerp(14, 30, blend) : 5);
@@ -283,6 +300,8 @@ export class ShooterScene implements GameScene {
     this.enemyBullets.sync();
     this.shake = Math.max(0, this.shake - realDt * 1.5);
     this.director.update(realDt, this.camera, this.playfield.cameraDistance, this.player.x, this.player.y, this.shake);
+    this.nebula.update(dt, this.camera, playing ? MathUtils.lerp(14, 30, blend) : 5);
+    this.updateFx(realDt);
     this.cockpitOverlay.setOpacity(this.cockpitHudOpacity(blend));
     this.cockpitOverlay.setLetterbox(this.director.letterbox);
     this.cockpitOverlay.update(realDt);
@@ -486,7 +505,8 @@ export class ShooterScene implements GameScene {
     this.starfield.dispose();
     this.playerBullets.dispose();
     this.enemyBullets.dispose();
-    this.effects.particles.dispose();
+    this.effects.dispose();
+    this.nebula.dispose();
     disposeModel(this.player.model);
   }
 
@@ -627,10 +647,13 @@ export class ShooterScene implements GameScene {
     this.shake = 0.6;
     navigator.vibrate?.(this.lives > 0 ? 80 : 250);
     this.audio.sfx.playerHit();
+    this.fx.kickAberration(1.2);
     if (this.director.blend > 0) {
       this.cockpitOverlay.hitFlash();
     } else {
       this.effects.explode(x, y, PLAYER_COLORS, 40, 12, 0.9);
+      this.effects.ring(x, y, 0.2, 0x6ff3ff, 5, 0.5);
+      this.blast(tmpVec.set(x, y, 0), this.lives > 1 ? 0.6 : 1.3);
     }
 
     // Clearing enemy fire on hit gives the player a moment to recover.
@@ -758,8 +781,12 @@ export class ShooterScene implements GameScene {
     const e = this.enemies[index]!;
     this.score += e.score;
     const big = e.kind === 'tank';
-    this.effects.explode(e.x, e.y, ENEMY_COLORS[e.kind], big ? 60 : 18, big ? 11 : 8, big ? 0.9 : 0.55);
-    if (big) this.shake = Math.max(this.shake, 0.35);
+    this.effects.explode(e.x, e.y, ENEMY_COLORS[e.kind], big ? 60 : 22, big ? 11 : 8, big ? 0.9 : 0.55);
+    this.effects.ring(e.x, e.y, 0.3, big ? 0xffb443 : 0xff5a36, big ? 8 : 3.2, big ? 0.6 : 0.35);
+    if (big) {
+      this.shake = Math.max(this.shake, 0.35);
+      this.blast(tmpVec.set(e.x, e.y, 0), 1);
+    }
     this.audio.sfx.explosion(big ? 'big' : 'small');
     if (big || Math.random() < POWERUP.dropChance) this.spawnPowerup(e.x, e.y);
     this.removeEnemyAt(index);
@@ -791,6 +818,38 @@ export class ShooterScene implements GameScene {
 
   // --- Presentation ----------------------------------------------------------------------
 
+  /** Screen shockwave (and a little aberration) at a world position. */
+  private blast(position: Vector3, strength: number): void {
+    tmpVec.copy(position).project(this.camera);
+    if (tmpVec.z > 1) return;
+    this.fx.shockwave((tmpVec.x + 1) / 2, (tmpVec.y + 1) / 2, strength);
+    this.fx.kickAberration(0.5 * strength);
+  }
+
+  /** Zoom blur while the camera swoops between views, and the Focus slow-mo tint. */
+  private updateFx(realDt: number): void {
+    const blend = this.director.blend;
+    const speed = realDt > 0 ? Math.abs(blend - this.prevBlend) / realDt : 0;
+    this.prevBlend = blend;
+    const transition = this.director.transitioning ? speed * COCKPIT.enterDuration * 0.45 : 0;
+    this.fx.zoomBlur = MathUtils.damp(this.fx.zoomBlur, transition + blend * 0.06, 8, realDt);
+    const focusing = this.state === 'playing' && this.cockpit.focusing;
+    this.fx.focus = MathUtils.damp(this.fx.focus, focusing ? 1 : 0, 10, realDt);
+    this.fx.aberration = blend * 0.15;
+  }
+
+  /** Glowing exhaust trail behind the ship in the top-down view. */
+  private updateEnginePlume(dt: number): void {
+    if (!this.player.object.visible || this.director.blend > 0.3) return;
+    this.plumeTimer -= dt;
+    while (this.plumeTimer <= 0) {
+      this.plumeTimer += 1 / 45;
+      const color = Math.random() < 0.5 ? 0xffa040 : 0x6ff3ff;
+      const x = this.player.x + MathUtils.randFloatSpread(0.25);
+      this.effects.trail(x, this.player.y + this.player.tailY, -0.1, color, 0.28, 0.5, -9);
+    }
+  }
+
   private updateHud(): void {
     this.pauseMenu.setButtonVisible(this.state === 'playing' && !this.frozen);
     this.hud.setWave(this.state === 'title' ? 0 : this.spawner.wave);
@@ -800,6 +859,8 @@ export class ShooterScene implements GameScene {
     this.hud.setWeaponLevel(this.weaponLevel, PLAYER.maxWeaponLevel);
   }
 }
+
+const tmpVec = new Vector3();
 
 function circlesOverlap(ax: number, ay: number, ar: number, bx: number, by: number, br: number): boolean {
   const dx = ax - bx;
