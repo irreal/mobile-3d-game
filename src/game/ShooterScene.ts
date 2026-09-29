@@ -77,7 +77,7 @@ const ENEMY_COLORS: Record<EnemyKind, readonly number[]> = {
   tank: [0xff5a36, 0xffe14d, 0xff2d55, 0xffffff],
 };
 const PLAYER_COLORS = [0xdfe7ff, 0x3b7bff, 0x6ff3ff, 0xffa040];
-const PLAYER_BULLET_COLOR = new Color(0x7ff6ff).multiplyScalar(1.9);
+const PLAYER_BULLET_COLOR = new Color(0x7ff6ff).multiplyScalar(1.25);
 
 /** Offsets and angles (degrees) of the player's shots per weapon level. */
 const WEAPON_PATTERNS: readonly (readonly [number, number])[][] = [
@@ -121,7 +121,7 @@ export class ShooterScene implements GameScene {
   );
   private readonly enemyBullets = new InstancedPool(
     glowGeometry,
-    createGlowMaterial({ size: 1.05, intensity: 2.2, core: 0.4, color: [1, 0.3, 0.55] }),
+    createGlowMaterial({ size: 1.05, intensity: 1.6, core: 0.4, color: [1, 0.3, 0.55] }),
     400,
   );
   private readonly enemies: Enemy[] = [];

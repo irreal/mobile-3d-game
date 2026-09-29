@@ -112,8 +112,8 @@ function shipMaterial(asset: ShipAsset): MeshStandardMaterial {
 }
 
 const engineGlowMaterials = {
-  player: createGlowMaterial({ size: 1.3, intensity: 2.2, color: [1, 0.55, 0.2] }),
-  enemy: createGlowMaterial({ size: 0.75, intensity: 1.6, color: [1, 0.25, 0.35] }),
+  player: createGlowMaterial({ size: 1.3, intensity: 1.5, color: [1, 0.55, 0.2] }),
+  enemy: createGlowMaterial({ size: 0.75, intensity: 1.2, color: [1, 0.25, 0.35] }),
 };
 
 const sharedMaterials = new Set<Material>(Object.values(engineGlowMaterials));

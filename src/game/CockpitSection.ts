@@ -119,11 +119,11 @@ export class CockpitSection {
   private readonly rockets: Rocket[] = [];
   private readonly launchQueue: { target: Lockable; volley: Volley }[] = [];
   private readonly markers: LockMarker[] = [];
-  private readonly orbMaterial = createGlowMaterial({ size: 1.5, intensity: 2.4, core: 0.35, color: [1, 0.3, 0.55] });
-  private readonly rocketMaterial = new MeshBasicMaterial({ color: new Color(0xfff1c9).multiplyScalar(2) });
-  private readonly overchargedMaterial = new MeshBasicMaterial({ color: new Color(0xffd23d).multiplyScalar(2.5) });
+  private readonly orbMaterial = createGlowMaterial({ size: 1.5, intensity: 1.8, core: 0.35, color: [1, 0.3, 0.55] });
+  private readonly rocketMaterial = new MeshBasicMaterial({ color: new Color(0xfff1c9).multiplyScalar(1.4) });
+  private readonly overchargedMaterial = new MeshBasicMaterial({ color: new Color(0xffd23d).multiplyScalar(1.8) });
   private readonly streakMaterial = new MeshBasicMaterial({
-    color: new Color(0x9fe8ff).multiplyScalar(1.8),
+    color: new Color(0x9fe8ff).multiplyScalar(1.3),
     transparent: true,
     opacity: 0.85,
     blending: AdditiveBlending,

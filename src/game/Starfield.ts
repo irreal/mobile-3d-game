@@ -37,7 +37,7 @@ export class Starfield {
     const specs = [
       { count: 350, z: -45, size: 0.18, speed: 0.35, color: 0x7788bb, glow: 1 },
       { count: 220, z: -25, size: 0.22, speed: 0.6, color: 0xaab8e8, glow: 1.4 },
-      { count: 90, z: -8, size: 0.14, speed: 1, color: 0xffffff, glow: 2.2 },
+      { count: 90, z: -8, size: 0.14, speed: 1, color: 0xffffff, glow: 1.6 },
     ];
     for (const spec of specs) {
       const positions = new Float32Array(spec.count * 3);
