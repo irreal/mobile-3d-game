@@ -30,6 +30,8 @@ interface Fighter extends Lockable {
   hover: Vector3;
   /** Seconds before it starts flying in. */
   delay: number;
+  /** Reinforcement round (0-based) this fighter warps in with. */
+  round: number;
   age: number;
   phase: number;
   fireTimer: number;
@@ -138,6 +140,9 @@ export class CockpitSection {
   private launchTimer = 0;
   private launchSide = 1;
   private fleeing = false;
+  private round = 0;
+  private roundStart = 0;
+  private roundSizes: number[] = [];
   private totalLocks = 0;
   private running = false;
   private alarmPlayed = false;
@@ -160,12 +165,15 @@ export class CockpitSection {
   }
 
   /** Spawns the squadron ahead of the ship at (`shipX`, `shipY`). */
-  start(shipX: number, shipY: number, wave: number, difficulty: number, aspect: number): void {
+  /** `strike` is the 1-based count of cockpit strikes this game (drives squadron size). */
+  start(shipX: number, shipY: number, strike: number, difficulty: number, aspect: number): void {
     this.clear();
     this.running = true;
     this.anchor.set(shipX, shipY, 0);
-    this.wave = wave;
+    this.wave = strike;
     this.difficulty = difficulty;
+    this.round = 0;
+    this.roundStart = 0;
     this.time = 0;
     this.activeTime = 0;
     this.fleeing = false;
@@ -174,14 +182,20 @@ export class CockpitSection {
     this.focusing = false;
     this.timeScale = 1;
 
-    const kinds: EnemyKind[] = [];
-    const small = Math.min(5 + wave * 2, 14);
-    for (let i = 0; i < small; i++) kinds.push(i % 3 === 2 ? 'weaver' : 'grunt');
-    const tanks = wave >= 4 ? 2 : wave >= 2 ? 1 : 0;
-    for (let i = 0; i < tanks; i++) kinds.splice(MathUtils.randInt(0, kinds.length), 0, 'tank');
+    const rounds: EnemyKind[][] = [];
+    for (let r = 0; r < COCKPIT.rounds; r++) {
+      const kinds: EnemyKind[] = [];
+      const small = Math.min(4 + strike + r, 9);
+      for (let i = 0; i < small; i++) kinds.push(i % 3 === 2 ? 'weaver' : 'grunt');
+      // Heavies join in later rounds, and in every round from the third strike on.
+      const tanks = r === COCKPIT.rounds - 1 ? Math.min(strike, 2) : strike >= 3 && r > 0 ? 1 : 0;
+      for (let i = 0; i < tanks; i++) kinds.splice(MathUtils.randInt(0, kinds.length), 0, 'tank');
+      rounds.push(kinds);
+    }
+    this.roundSizes = rounds.map((k) => k.length);
 
     const tanHalfFov = Math.tan(MathUtils.degToRad(COCKPIT.fov / 2));
-    kinds.forEach((kind, i) => {
+    rounds.forEach((kinds, round) => kinds.forEach((kind, i) => {
       const depth = MathUtils.randFloat(15, 30);
       // Keep hover spots inside the view at that depth; portrait screens are narrow.
       const halfH = depth * tanHalfFov;
@@ -194,8 +208,26 @@ export class CockpitSection {
       );
       // Straight down the line of sight, so the warp exit reads as coming from the vanishing point.
       const start = hover.clone().add(tmp.set(0, WARP_IN_DISTANCE, 0));
-      this.spawnFighter(kind, start, hover, 0.15 + i * 0.16);
-    });
+      // Later rounds get their warp-in time when the round is triggered.
+      this.spawnFighter(kind, start, hover, round === 0 ? 0.15 + i * 0.16 : Infinity, round);
+    }));
+  }
+
+  /** Warps in the next reinforcement round once the current one is mostly cleared (or stale). */
+  private updateRounds(): void {
+    if (this.fleeing || this.round >= this.roundSizes.length - 1) return;
+    const left = this.fighters.filter((f) => f.round === this.round).length;
+    const stale = this.activeTime - this.roundStart > COCKPIT.roundTime;
+    if (left > COCKPIT.nextRoundWhenLeft && !stale) return;
+
+    this.round++;
+    this.roundStart = this.activeTime;
+    let i = 0;
+    for (const f of this.fighters) {
+      if (f.round === this.round) f.delay = this.activeTime + 0.5 + i++ * 0.16;
+    }
+    this.overlay.showCallout(this.round === this.roundSizes.length - 1 ? 'FINAL WAVE!' : 'REINFORCEMENTS!', 1.2);
+    this.sfx.alarm();
   }
 
   /** Launches rockets at everything locked (call on pointer release). */
@@ -236,6 +268,7 @@ export class CockpitSection {
       this.sfx.alarm();
     }
 
+    if (frame.active) this.updateRounds();
     this.updateFighters(dt, frame);
     if (this.updateOrbs(dt, frame)) {
       // May end the game, which clears this section.
@@ -294,7 +327,7 @@ export class CockpitSection {
 
   // --- Fighters and orbs -------------------------------------------------------------
 
-  private spawnFighter(kind: EnemyKind, start: Vector3, hover: Vector3, delay: number): void {
+  private spawnFighter(kind: EnemyKind, start: Vector3, hover: Vector3, delay: number, round: number): void {
     const model = ENEMY_STATS[kind].create();
     model.object.scale.setScalar(FIGHTER_SCALE);
     // Models are built facing +z (the top-down camera); turn them toward the cockpit.
@@ -316,6 +349,7 @@ export class CockpitSection {
       start,
       hover,
       delay,
+      round,
       age: 0,
       phase: Math.random() * Math.PI * 2,
       fireTimer: MathUtils.randFloat(2.5, 4.5),
@@ -453,6 +487,13 @@ export class CockpitSection {
 
   private flee(): void {
     this.fleeing = true;
+    // Reinforcements that never arrived simply don't come.
+    for (let i = this.fighters.length - 1; i >= 0; i--) {
+      const f = this.fighters[i]!;
+      if (f.age > 0) continue;
+      this.removeFighterModel(f);
+      this.fighters.splice(i, 1);
+    }
     this.launchQueue.length = 0;
     for (const target of this.lockables()) target.locks = 0;
     this.totalLocks = 0;

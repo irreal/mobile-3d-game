@@ -60,8 +60,16 @@ export const COCKPIT = {
   /** Seconds of HUD power-on animation before the fight starts. */
   bootDuration: 1.8,
   /** Section ends (remaining enemies flee) after this many seconds. */
-  timeLimit: 26,
+  timeLimit: 45,
   maxLocks: 8,
+  /** A cockpit strike happens after every this many waves. */
+  everyWaves: 2,
+  /** The squadron warps in over this many rounds of reinforcements. */
+  rounds: 3,
+  /** Next round warps in when at most this many of the current round remain... */
+  nextRoundWhenLeft: 1,
+  /** ...or after this many seconds, whichever comes first. */
+  roundTime: 13,
   /** Minimum seconds between two locks on the same target while swiping. */
   relockDelay: 0.2,
   /** Minimum touch radius in CSS pixels for locking; small targets get this much slack. */

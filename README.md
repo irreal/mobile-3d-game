@@ -55,8 +55,8 @@ won't work over plain-HTTP LAN; use the deployed GitHub Pages site to test those
 
 ### Cockpit strikes (between waves)
 
-Each wave is a fixed number of formations, and enemy HP grows each wave. Once the last enemy is
-gone, the camera slowly swoops down behind the ship (with cinematic letterbox bars and a barrel
+Each wave is a fixed number of formations, and enemy HP grows each wave. After every second wave
+(2, 4, 6, …), once the last enemy is gone, the camera slowly swoops down behind the ship (with cinematic letterbox bars and a barrel
 roll) into the cockpit. The HUD powers on (flicker, scan line, boot text), then the enemy
 squadron drops out of warp right in front of you and you fight it in first person:
 
@@ -69,8 +69,10 @@ squadron drops out of warp right in front of you and you fight it in first perso
   within a few meters of each hit (targets and orbs). Splash kills count toward the chain.
 - Kills from the same volley **chain**: the 2nd kill scores ×2, the 3rd ×3, and so on.
 - Enemies fire glowing plasma orbs at the cockpit. Lock and shoot them down before they hit you.
-- Clear the squadron before the timer runs out for a bonus (more for time left). If time runs
-  out, they escape.
+- The squadron attacks in 3 rounds. When a round is almost cleared (or after a while), the next
+  round of **reinforcements** warps in, and the last round brings the heavies.
+- Clear all rounds before the 45-second timer runs out for a bonus (more for time left). If time
+  runs out, they escape.
 - The camera then flies back out and the next, harder wave starts. Squadrons grow and gain heavies
   in later waves.
 - The high score is stored in `localStorage`. Add `?fps` to the URL to show an FPS meter

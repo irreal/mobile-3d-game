@@ -320,20 +320,24 @@ export class ShooterScene implements GameScene {
           this.setPhase('waveClear');
           this.popEnemyBullets();
           this.audio.sfx.waveClear();
-          this.flashMessage(`WAVE ${this.spawner.wave} CLEAR`, 'Enemy squadron ahead!\nSwitching to cockpit…', 2.2);
+          const body = this.isStrikeWave ? 'Enemy squadron ahead!\nSwitching to cockpit…' : 'Next wave incoming';
+          this.flashMessage(`WAVE ${this.spawner.wave} CLEAR`, body, 2.2);
         }
         break;
 
       case 'waveClear':
         // Player can still steer to grab falling power-ups; no firing.
         this.steerPlayer(dt);
-        if (this.phaseTime > WAVE_CLEAR_PAUSE) {
+        if (this.phaseTime > WAVE_CLEAR_PAUSE && !this.isStrikeWave) {
+          this.startNextWave();
+        } else if (this.phaseTime > WAVE_CLEAR_PAUSE) {
           this.setPhase('toCockpit');
           this.director.enterCockpit();
           this.audio.sfx.flyIn(COCKPIT.enterDuration);
           this.setMusicCutoff(450, COCKPIT.enterDuration * 0.8);
           const pf = this.playfield;
-          this.cockpit.start(this.player.x, this.player.y, this.spawner.wave, difficulty, pf.widthPx / pf.heightPx);
+          const strike = this.spawner.wave / COCKPIT.everyWaves;
+          this.cockpit.start(this.player.x, this.player.y, strike, difficulty, pf.widthPx / pf.heightPx);
         }
         break;
 
@@ -369,6 +373,10 @@ export class ShooterScene implements GameScene {
         }
         break;
     }
+  }
+
+  private get isStrikeWave(): boolean {
+    return this.spawner.wave % COCKPIT.everyWaves === 0;
   }
 
   private startCockpitFight(): void {
