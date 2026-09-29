@@ -1,6 +1,7 @@
 import './style.css';
 import { GameAudio } from './audio/GameAudio.ts';
 import { Engine } from './core/Engine.ts';
+import { loadCockpitModel } from './game/CockpitInterior.ts';
 import { loadShipModels } from './game/models.ts';
 import { ShooterScene } from './game/ShooterScene.ts';
 import { Input } from './input/Input.ts';
@@ -19,7 +20,7 @@ hud.addMuteButton(audio.engine.muted, () => audio.engine.toggleMuted());
 audio.engine.onMuteChange((muted) => hud.setMuted(muted));
 
 hud.showMessage('NOVA STRIKE', 'Loading…');
-await loadShipModels();
+await Promise.all([loadShipModels(), loadCockpitModel()]);
 
 engine.setScene(
   new ShooterScene(engine.camera, input, audio, { container, hud, cockpit: cockpitOverlay }, engine.fx),

@@ -92,6 +92,11 @@ export class CockpitOverlay {
   }
 
   /** 0 hides everything; 1 is fully shown. */
+  /** With a 3D cockpit interior, the painted canopy frame and dashboard are dropped. */
+  setInterior(on: boolean): void {
+    this.root.classList.toggle('with-interior', on);
+  }
+
   setOpacity(opacity: number): void {
     this.root.style.opacity = String(opacity);
     this.root.style.visibility = opacity > 0.01 ? 'visible' : 'hidden';

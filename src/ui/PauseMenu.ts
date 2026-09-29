@@ -53,6 +53,7 @@ export class PauseMenu {
       this.effectsButton,
       this.tutorialButton,
       menuButton('Quit to title', actions.quit),
+      credits(),
     );
     this.modal.append(card);
     this.modal.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -88,6 +89,15 @@ export class PauseMenu {
   renderEffects(quality: 'high' | 'low'): void {
     this.effectsButton.textContent = quality === 'high' ? 'Effects: High' : 'Effects: Low (faster)';
   }
+}
+
+/** Required by the cockpit model's CC-BY license (the ship models are CC0; credited anyway). */
+function credits(): HTMLDivElement {
+  const c = document.createElement('div');
+  c.className = 'menu-credits';
+  c.textContent =
+    'Cockpit model by Ville Seppanen (Osmic), CC-BY 3.0 · Ship models by Quaternius, CC0 · Music & sound synthesized in-game';
+  return c;
 }
 
 function menuButton(label: string, onClick: () => void, variant?: 'primary'): HTMLButtonElement {
