@@ -55,6 +55,8 @@ interface Rocket {
 
 interface Volley {
   kills: number;
+  /** All lock slots were used: rockets deal splash damage. */
+  overcharged: boolean;
 }
 
 export type SectionStatus = 'running' | 'cleared' | 'escaped';
@@ -95,6 +97,7 @@ const EXPLOSION_COLORS: Record<EnemyKind, readonly number[]> = {
 const UP = new Vector3(0, 1, 0);
 const tmp = new Vector3();
 const tmp2 = new Vector3();
+const splashCenter = new Vector3();
 
 /**
  * First-person "strike" fight between waves: a squadron flies in ahead of the ship.
@@ -116,6 +119,7 @@ export class CockpitSection {
     depthWrite: false,
   });
   private readonly rocketMaterial = new MeshBasicMaterial({ color: 0xfff1c9 });
+  private readonly overchargedMaterial = new MeshBasicMaterial({ color: 0xffd23d });
   private readonly streakMaterial = new MeshBasicMaterial({
     color: 0x9fe8ff,
     transparent: true,
@@ -128,6 +132,8 @@ export class CockpitSection {
   private wave = 1;
   private difficulty = 0;
   private time = 0;
+  /** Unscaled clock, so lock timing feels the same in slow-mo. */
+  private realTime = 0;
   private activeTime = 0;
   private launchTimer = 0;
   private launchSide = 1;
@@ -135,6 +141,11 @@ export class CockpitSection {
   private totalLocks = 0;
   private running = false;
   private alarmPlayed = false;
+  /** Focus meter, 0..1. */
+  focus = 1;
+  focusing = false;
+  /** Current simulation speed multiplier (eases toward the Focus slow-mo). */
+  timeScale = 1;
 
   constructor(
     private readonly scene: Scene,
@@ -159,6 +170,9 @@ export class CockpitSection {
     this.activeTime = 0;
     this.fleeing = false;
     this.alarmPlayed = false;
+    this.focus = 1;
+    this.focusing = false;
+    this.timeScale = 1;
 
     const kinds: EnemyKind[] = [];
     const small = Math.min(5 + wave * 2, 14);
@@ -187,7 +201,12 @@ export class CockpitSection {
   /** Launches rockets at everything locked (call on pointer release). */
   fire(): void {
     if (!this.running || this.totalLocks === 0) return;
-    const volley: Volley = { kills: 0 };
+    const overcharged = this.totalLocks >= COCKPIT.maxLocks;
+    const volley: Volley = { kills: 0, overcharged };
+    if (overcharged) {
+      this.overlay.showCallout('OVERCHARGE!', 0.9);
+      this.sfx.overcharge();
+    }
     for (const target of this.lockables()) {
       for (let i = 0; i < target.locks; i++) this.launchQueue.push({ target, volley });
       target.incoming += target.locks;
@@ -205,9 +224,11 @@ export class CockpitSection {
     this.orbs.length = 0;
   }
 
-  update(dt: number, frame: CockpitFrame): SectionStatus {
+  update(realDt: number, frame: CockpitFrame): SectionStatus {
     if (!this.running) return 'running';
+    const dt = this.updateFocus(realDt, frame);
     this.time += dt;
+    this.realTime += realDt;
     if (frame.active) this.activeTime += dt;
     if (!this.fleeing && this.activeTime >= COCKPIT.timeLimit) this.flee();
     if (!this.fleeing && !this.alarmPlayed && this.timeLeft < 5) {
@@ -233,6 +254,21 @@ export class CockpitSection {
     return 'running';
   }
 
+  /** Advances the Focus meter in real time and returns the scaled simulation step. */
+  private updateFocus(realDt: number, frame: CockpitFrame): number {
+    const wantsFocus = frame.active && frame.pointerDown && !this.fleeing;
+    const focusing = wantsFocus && this.focus > 0;
+    if (focusing !== this.focusing) {
+      this.focusing = focusing;
+      if (focusing) this.sfx.focusIn();
+      else this.sfx.focusOut();
+    }
+    if (focusing) this.focus = Math.max(0, this.focus - COCKPIT.focusDrain * realDt);
+    else if (!wantsFocus) this.focus = Math.min(1, this.focus + COCKPIT.focusRecharge * realDt);
+    this.timeScale = MathUtils.damp(this.timeScale, focusing ? COCKPIT.focusTimeScale : 1, 12, realDt);
+    return realDt * this.timeScale;
+  }
+
   clear(): void {
     for (const f of this.fighters) this.removeFighterModel(f);
     for (const o of this.orbs) this.removeMesh(o.mesh);
@@ -243,6 +279,8 @@ export class CockpitSection {
     this.launchQueue.length = 0;
     this.totalLocks = 0;
     this.running = false;
+    this.focusing = false;
+    this.timeScale = 1;
     this.overlay.reset();
   }
 
@@ -250,6 +288,7 @@ export class CockpitSection {
     this.clear();
     this.orbMaterial.dispose();
     this.rocketMaterial.dispose();
+    this.overchargedMaterial.dispose();
     this.streakMaterial.dispose();
   }
 
@@ -432,7 +471,7 @@ export class CockpitSection {
     for (const target of this.lockables()) {
       if (this.totalLocks >= COCKPIT.maxLocks) return;
       if (target.locks + target.incoming >= target.hp) continue;
-      if (this.time - target.lastLockTime < COCKPIT.relockDelay) continue;
+      if (this.realTime - target.lastLockTime < COCKPIT.relockDelay) continue;
       const screen = this.project(target, frame);
       if (!screen) continue;
       const dx = screen.x - frame.pointerX;
@@ -440,7 +479,7 @@ export class CockpitSection {
       const r = Math.max(screen.r, COCKPIT.minLockRadiusPx);
       if (dx * dx + dy * dy > r * r) continue;
       target.locks++;
-      target.lastLockTime = this.time;
+      target.lastLockTime = this.realTime;
       this.totalLocks++;
       this.sfx.lock(this.totalLocks, COCKPIT.maxLocks);
       navigator.vibrate?.(8);
@@ -453,7 +492,11 @@ export class CockpitSection {
       this.launchTimer += 0.05;
       const { target, volley } = this.launchQueue.shift()!;
       this.launchSide = -this.launchSide;
-      const mesh = new Mesh(sharedGeometries.rocket, this.rocketMaterial);
+      const mesh = new Mesh(
+        sharedGeometries.rocket,
+        volley.overcharged ? this.overchargedMaterial : this.rocketMaterial,
+      );
+      if (volley.overcharged) mesh.scale.setScalar(1.4);
       mesh.position.set(frame.eye.x + this.launchSide * 1.3, frame.eye.y + 0.6, frame.eye.z - 0.6);
       this.scene.add(mesh);
       this.sfx.rocket();
@@ -483,7 +526,8 @@ export class CockpitSection {
       }
       pos.addScaledVector(r.velocity, dt);
       r.mesh.quaternion.setFromUnitVectors(UP, tmp2.copy(r.velocity).normalize());
-      this.effects.trail(pos.x, pos.y, pos.z, r.age < 0.15 ? 0xffffff : 0xffa040);
+      const trailColor = r.volley.overcharged ? 0xffd23d : 0xffa040;
+      this.effects.trail(pos.x, pos.y, pos.z, r.age < 0.15 ? 0xffffff : trailColor);
 
       if (r.target && pos.distanceTo(r.target.position) < r.target.radius + 0.4) {
         this.hitTarget(r.target, r.volley);
@@ -514,8 +558,20 @@ export class CockpitSection {
   }
 
   private hitTarget(target: Lockable, volley: Volley): void {
-    target.hp--;
     target.incoming = Math.max(0, target.incoming - 1);
+    const center = splashCenter.copy(target.position);
+    this.damage(target, volley);
+    if (!volley.overcharged) return;
+
+    this.effects.explode(center.x, center.y, [0xffd23d, 0xffffff, 0xff8a3d], 30, 14, 0.5, center.z);
+    const r2 = COCKPIT.overchargeRadius ** 2;
+    const splashed = [...this.lockables()].filter((t) => t.position.distanceToSquared(center) < r2);
+    for (const t of splashed) this.damage(t, volley);
+  }
+
+  private damage(target: Lockable, volley: Volley): void {
+    if (!target.alive) return;
+    target.hp--;
     const p = target.position;
 
     const fighter = this.fighters.find((f) => f === target);
@@ -581,6 +637,7 @@ export class CockpitSection {
     }
     this.overlay.setLocks(this.markers, this.totalLocks, COCKPIT.maxLocks);
     this.overlay.setTimer(this.timeLeft / COCKPIT.timeLimit);
+    this.overlay.setFocus(this.focus, this.focusing);
     this.overlay.setBrush(frame.active && frame.pointerDown ? frame.pointerX : null, frame.pointerY);
     this.overlay.setHintVisible(frame.active && this.activeTime < 4 && this.wave <= 2);
   }

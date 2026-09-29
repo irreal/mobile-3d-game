@@ -63,6 +63,10 @@ squadron drops out of warp right in front of you and you fight it in first perso
 - **Swipe over targets to lock on, lift your finger to fire** homing rockets at everything locked
   (up to 8 locks). A single tap on a target also works.
 - Heavies need several locks: swipe over them repeatedly.
+- **Focus:** while your finger is down, time slows to a crawl so you can line up locks. The Focus
+  meter drains while slowed and refills while your finger is up; when it's empty, time runs normally.
+- **Overcharge:** fire a volley with all 8 locks and the rockets turn gold and blast everything
+  within a few meters of each hit (targets and orbs). Splash kills count toward the chain.
 - Kills from the same volley **chain**: the 2nd kill scores ×2, the 3rd ×3, and so on.
 - Enemies fire glowing plasma orbs at the cockpit. Lock and shoot them down before they hit you.
 - Clear the squadron before the timer runs out for a bonus (more for time left). If time runs
@@ -71,6 +75,19 @@ squadron drops out of warp right in front of you and you fight it in first perso
   in later waves.
 - The high score is stored in `localStorage`. Add `?fps` to the URL to show an FPS meter
   (always on in dev).
+
+## Menus, tutorials and version
+
+- **Pause** with the pause button (bottom-right, during play), Esc or P. The game also pauses when
+  the tab/app goes to the background. The menu has Resume, Restart, Sound on/off, Show tutorials
+  again, and Quit to title.
+- **Tutorials:** a quick "How to fly" card at the start of each game, and a "Cockpit strike" card the
+  first time you enter the cockpit in each game. From the third time a card is shown, it offers
+  a *Don't show again* checkbox. Show counts and opt-outs are stored in `localStorage`
+  (`nova-strike:tutorial:*`). *Show tutorials again* in the pause menu clears them.
+- **Version:** bottom-left shows `v<package.json version> · <commit>`. Both are injected at build
+  time by `vite.config.ts` (the commit comes from `GITHUB_SHA` in CI, or `git` locally). Bump
+  `version` in `package.json` for releases.
 
 ## Audio
 
@@ -118,7 +135,9 @@ src/
     GameAudio.ts           Bundles engine, music and sfx
   ui/
     Hud.ts                 Score, high score, wave, lives, weapon level, messages, FPS meter
-    CockpitOverlay.ts      Canopy frame, crosshair, lock reticles, timer, callouts, hit flash
+    CockpitOverlay.ts      Canopy frame, crosshair, lock reticles, timer, Focus meter, callouts
+    PauseMenu.ts           Pause button and pause menu
+    Tutorial.ts            Tutorial cards and their show-count / opt-out storage
 ```
 
 Gameplay happens on the z = 0 plane with +y as "up the screen"; the top-down camera looks straight

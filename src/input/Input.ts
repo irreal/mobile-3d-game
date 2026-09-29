@@ -47,6 +47,11 @@ export class Input {
     return () => this.tapListeners.delete(listener);
   }
 
+  /** Fires once per press of a key (by `KeyboardEvent.code`). */
+  onKey(code: string, listener: () => void): void {
+    this.keyboard.onPress(code, listener);
+  }
+
   /** Fires when the steering pointer is lifted (or cancelled). */
   onRelease(listener: () => void): () => void {
     this.releaseListeners.add(listener);

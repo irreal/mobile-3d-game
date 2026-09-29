@@ -67,6 +67,13 @@ export const COCKPIT = {
   /** Minimum touch radius in CSS pixels for locking; small targets get this much slack. */
   minLockRadiusPx: 34,
   rocketSpeed: 34,
+  /** Time scale while Focus (slow-mo) is active, i.e. while a finger is painting locks. */
+  focusTimeScale: 0.3,
+  /** Focus meter (0..1) drained per real second while focusing, and recharged while not. */
+  focusDrain: 0.4,
+  focusRecharge: 0.18,
+  /** A full-lock volley is Overcharged: each rocket also damages everything this close. */
+  overchargeRadius: 5,
   orbSpeed: 7,
   orbSpeedPerWave: 0.8,
   clearBonusPerWave: 1000,

@@ -140,7 +140,7 @@ body {
 .hud-fps {
   position: absolute;
   left: calc(env(safe-area-inset-left) + 14px);
-  bottom: calc(env(safe-area-inset-bottom) + 8px);
+  bottom: calc(env(safe-area-inset-bottom) + 24px);
   font-size: 11px;
   opacity: 0.5;
 }
@@ -341,7 +341,7 @@ body {
   position: absolute;
   left: 8%;
   right: 8%;
-  bottom: calc(env(safe-area-inset-bottom) + 64px);
+  bottom: calc(env(safe-area-inset-bottom) + 84px);
   text-align: center;
   font-size: 13px;
   letter-spacing: 0.1em;
@@ -601,5 +601,315 @@ body {
   }
   to {
     transform: scaleX(1);
+  }
+}
+
+/* --- Cockpit focus (slow-mo) --------------------------------------------------------- */
+
+.cockpit-focus {
+  position: absolute;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom) + 46px);
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+}
+
+.cockpit-focus-track {
+  width: 110px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgb(159 232 255 / 18%);
+  overflow: hidden;
+}
+
+.cockpit-focus-fill {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, #b48cff, #6ff3ff);
+  transform-origin: left center;
+}
+
+.cockpit-focus.empty {
+  color: #ff6b8e;
+}
+
+.cockpit::before {
+  /* Slow-mo tint: violet vignette that fades in while focusing. */
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 45%, rgb(120 70 255 / 38%) 100%);
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+}
+
+.cockpit.focusing::before {
+  opacity: 1;
+}
+
+.cockpit.booting .cockpit-focus {
+  animation: boot-fade 0.3s 1.3s both;
+}
+
+/* --- Version, pause button ------------------------------------------------------------ */
+
+.hud-version {
+  position: absolute;
+  left: calc(env(safe-area-inset-left) + 10px);
+  bottom: calc(env(safe-area-inset-bottom) + 6px);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  opacity: 0.35;
+}
+
+.hud-pause {
+  position: absolute;
+  right: calc(env(safe-area-inset-right) + 58px);
+  bottom: calc(env(safe-area-inset-bottom) + 10px);
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 20%);
+  border-radius: 50%;
+  background: rgb(10 14 30 / 55%);
+  color: rgb(232 236 245 / 80%);
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.hud-pause[hidden] {
+  display: none;
+}
+
+/* --- Modals (pause menu, tutorials) ------------------------------------------------- */
+
+.modal {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 16px);
+  background: rgb(3 5 14 / 62%);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  pointer-events: auto;
+  user-select: none;
+  -webkit-user-select: none;
+  animation: modal-in 180ms ease-out;
+}
+
+.modal[hidden] {
+  display: none;
+}
+
+.modal-card {
+  width: min(360px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px 20px 20px;
+  border: 1px solid rgb(111 243 255 / 35%);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgb(20 30 62 / 96%), rgb(8 12 30 / 96%));
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 40%),
+    0 20px 60px rgb(0 0 0 / 55%),
+    inset 0 0 30px rgb(111 243 255 / 8%);
+}
+
+.modal-title {
+  margin-bottom: 4px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  color: #9fe8ff;
+}
+
+.menu-button {
+  min-height: 46px;
+  padding: 0 16px;
+  border: 1px solid rgb(159 232 255 / 30%);
+  border-radius: 10px;
+  background: rgb(159 232 255 / 8%);
+  color: #e8ecf5;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  touch-action: manipulation;
+}
+
+.menu-button:active {
+  transform: scale(0.98);
+  background: rgb(159 232 255 / 18%);
+}
+
+.menu-button:disabled {
+  opacity: 0.6;
+}
+
+.menu-button.primary {
+  border-color: transparent;
+  background: linear-gradient(180deg, #6ff3ff, #3b7bff);
+  color: #05060f;
+  font-weight: 800;
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* --- Tutorial cards ---------------------------------------------------------------- */
+
+.tutorial-lines {
+  margin: 0;
+  padding: 0 0 0 18px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: rgb(232 236 245 / 90%);
+}
+
+.tutorial-lines li + li {
+  margin-top: 6px;
+}
+
+.tutorial-lines b {
+  color: #fff;
+}
+
+.tutorial-optout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px;
+  font-size: 14px;
+  color: rgb(232 236 245 / 80%);
+}
+
+.tutorial-optout[hidden] {
+  display: none;
+}
+
+.tutorial-optout input {
+  width: 20px;
+  height: 20px;
+  accent-color: #6ff3ff;
+}
+
+.tutorial-art {
+  position: relative;
+  height: 110px;
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 50% 120%, rgb(59 123 255 / 25%), transparent 60%),
+    rgb(3 5 14 / 60%);
+  overflow: hidden;
+}
+
+.tutorial-finger {
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 85%);
+  box-shadow: 0 0 0 8px rgb(255 255 255 / 15%);
+}
+
+.tutorial-target {
+  position: absolute;
+}
+
+/* Flight: a ship that mirrors a finger dragging below it. */
+.tutorial-art-drag .tutorial-target {
+  left: 50%;
+  top: 34%;
+  width: 0;
+  height: 0;
+  margin-left: -14px;
+  border-left: 14px solid transparent;
+  border-right: 14px solid transparent;
+  border-bottom: 26px solid #6ff3ff;
+  animation: tut-drag 2.4s ease-in-out infinite;
+}
+
+.tutorial-art-drag .tutorial-finger {
+  left: 50%;
+  top: 78%;
+  animation: tut-drag 2.4s ease-in-out infinite;
+}
+
+@keyframes tut-drag {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  30% {
+    transform: translateX(-70px);
+  }
+  70% {
+    transform: translateX(70px);
+  }
+}
+
+/* Cockpit: a finger sweeping across a row of targets that light up as locked. */
+.tutorial-art-swipe .tutorial-target {
+  left: 18%;
+  right: 18%;
+  top: 38%;
+  height: 22px;
+  background:
+    radial-gradient(circle, #57e389 7px, transparent 8px) 0 50% / 33.3% 100% repeat-x;
+  animation: tut-lock 2.4s linear infinite;
+}
+
+.tutorial-art-swipe .tutorial-finger {
+  top: 50%;
+  animation: tut-swipe 2.4s ease-in-out infinite;
+}
+
+@keyframes tut-swipe {
+  0% {
+    left: 15%;
+    opacity: 1;
+  }
+  60% {
+    left: 85%;
+    opacity: 1;
+  }
+  70%,
+  100% {
+    left: 85%;
+    opacity: 0;
+  }
+}
+
+@keyframes tut-lock {
+  0%,
+  10% {
+    filter: none;
+    outline: 0 solid transparent;
+  }
+  60% {
+    filter: drop-shadow(0 0 6px #ff3d6e) hue-rotate(160deg);
+  }
+  75% {
+    filter: brightness(3) drop-shadow(0 0 10px #ffd23d);
+  }
+  90%,
+  100% {
+    filter: none;
+    opacity: 0.2;
   }
 }

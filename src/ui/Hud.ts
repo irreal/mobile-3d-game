@@ -10,6 +10,7 @@ export class Hud {
   private readonly messageTitle: HTMLDivElement;
   private readonly messageBody: HTMLDivElement;
   private readonly fps: HTMLDivElement | null;
+  private renderMute: ((muted: boolean) => void) | null = null;
   private frames = 0;
   private accumulated = 0;
   private shown = { score: -1, hiScore: -1, lives: -1, weapon: -1, wave: -1 };
@@ -35,6 +36,10 @@ export class Hud {
 
     this.root.append(top, this.message);
 
+    const version = el('div', 'hud-version');
+    version.textContent = `v${__APP_VERSION__} · ${__APP_COMMIT__}`;
+    this.root.append(version);
+
     const showFps = import.meta.env.DEV || new URLSearchParams(location.search).has('fps');
     this.fps = showFps ? el('div', 'hud-fps') : null;
     if (this.fps) this.root.append(this.fps);
@@ -52,10 +57,15 @@ export class Hud {
       button.setAttribute('aria-label', m ? 'Unmute sound' : 'Mute sound');
     };
     render(muted);
+    this.renderMute = render;
     // Keep taps on the button from reaching the game (start/steer).
     button.addEventListener('pointerdown', (e) => e.stopPropagation());
     button.addEventListener('click', () => render(toggle()));
     this.root.append(button);
+  }
+
+  setMuted(muted: boolean): void {
+    this.renderMute?.(muted);
   }
 
   setScore(score: number): void {

@@ -15,7 +15,8 @@ const hud = new Hud(container);
 const cockpitOverlay = new CockpitOverlay(container);
 const audio = new GameAudio();
 hud.addMuteButton(audio.engine.muted, () => audio.engine.toggleMuted());
+audio.engine.onMuteChange((muted) => hud.setMuted(muted));
 
-engine.setScene(new ShooterScene(engine.camera, input, hud, cockpitOverlay, audio));
+engine.setScene(new ShooterScene(engine.camera, input, audio, { container, hud, cockpit: cockpitOverlay }));
 engine.onFrame((dt) => hud.tick(dt));
 engine.start();

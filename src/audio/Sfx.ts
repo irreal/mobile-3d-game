@@ -206,6 +206,25 @@ export class Sfx {
     this.a.tone({ freq: 120, to: 50, duration: 0.3, gain: 0.25 });
   }
 
+  /** Slow-mo engage: pitch drops like time stretching. */
+  focusIn(): void {
+    this.a.tone({ type: 'sine', freq: 520, to: 140, duration: 0.35, gain: 0.1 });
+    this.a.noise({ duration: 0.35, gain: 0.08, filter: { type: 'lowpass', freq: 2000, to: 200 } });
+  }
+
+  focusOut(): void {
+    this.a.tone({ type: 'sine', freq: 160, to: 480, duration: 0.2, gain: 0.07 });
+  }
+
+  /** Full-lock volley. */
+  overcharge(): void {
+    const t = this.a.now;
+    this.a.tone({ type: 'sawtooth', freq: 220, to: 880, duration: 0.3, gain: 0.08, filter: { type: 'lowpass', freq: 3000 } });
+    [0, 7, 12].forEach((semi, i) => {
+      this.a.tone({ type: 'square', freq: 880 * 2 ** (semi / 12), time: t + 0.05 + i * 0.05, duration: 0.2, gain: 0.05 });
+    });
+  }
+
   orbFire(): void {
     this.a.tone({ type: 'sine', freq: 180, to: 520, duration: 0.3, gain: 0.08 });
   }

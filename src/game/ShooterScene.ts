@@ -15,6 +15,8 @@ import type { GameScene } from '../core/Engine.ts';
 import type { Input, Vec2 } from '../input/Input.ts';
 import type { CockpitOverlay } from '../ui/CockpitOverlay.ts';
 import type { Hud } from '../ui/Hud.ts';
+import { PauseMenu } from '../ui/PauseMenu.ts';
+import { TutorialOverlay } from '../ui/Tutorial.ts';
 import { CameraDirector } from './CameraDirector.ts';
 import { CockpitSection } from './CockpitSection.ts';
 import type { SectionStatus } from './CockpitSection.ts';
@@ -41,6 +43,13 @@ import { WarpField } from './WarpField.ts';
 import { WaveSpawner } from './WaveSpawner.ts';
 
 type State = 'title' | 'playing' | 'gameover';
+
+export interface GameUi {
+  /** Element that DOM overlays (menus, tutorials) are added to. */
+  container: HTMLElement;
+  hud: Hud;
+  cockpit: CockpitOverlay;
+}
 
 /**
  * Phases while playing:
@@ -134,14 +143,51 @@ export class ShooterScene implements GameScene {
   private phase: Phase = 'shmup';
   private phaseTime = 0;
   private messageTimer = 0;
+  private paused = false;
+  private cockpitTutorialDone = false;
+  private wasFocusing = false;
+  /** Last requested music cutoff, restored after pausing. */
+  private musicCutoff = 20000;
+  private readonly hud: Hud;
+  private readonly cockpitOverlay: CockpitOverlay;
+  private readonly pauseMenu: PauseMenu;
+  private readonly tutorial: TutorialOverlay;
 
   constructor(
     private readonly camera: PerspectiveCamera,
     private readonly input: Input,
-    private readonly hud: Hud,
-    private readonly cockpitOverlay: CockpitOverlay,
     private readonly audio: GameAudio,
+    ui: GameUi,
   ) {
+    this.hud = ui.hud;
+    this.cockpitOverlay = ui.cockpit;
+    const cockpitOverlay = ui.cockpit;
+    this.tutorial = new TutorialOverlay(ui.container);
+    this.pauseMenu = new PauseMenu(
+      ui.container,
+      {
+        pause: () => this.pause(),
+        resume: () => this.resume(),
+        restart: () => {
+          this.closePause();
+          this.startGame();
+        },
+        quit: () => {
+          this.closePause();
+          this.quitToTitle();
+        },
+        toggleSound: () => audio.engine.toggleMuted(),
+        resetTutorials: () => this.tutorial.store.reset(),
+      },
+      audio.engine.muted,
+    );
+    audio.engine.onMuteChange((muted) => this.pauseMenu.renderSound(muted));
+    input.onKey('Escape', () => (this.paused ? this.resume() : this.pause()));
+    input.onKey('KeyP', () => (this.paused ? this.resume() : this.pause()));
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) this.pause();
+    });
+
     this.scene.background = new Color(0x05060f);
     this.scene.add(new HemisphereLight(0xb8c8ff, 0x1a1030, 1.4));
     const key = new DirectionalLight(0xffffff, 2.2);
@@ -181,6 +227,7 @@ export class ShooterScene implements GameScene {
 
     this.unsubscribeTap = input.onTap(this.handleTap);
     this.unsubscribeRelease = input.onRelease(() => {
+      if (this.frozen) return;
       if (this.state === 'playing' && (this.phase === 'cockpit' || this.phase === 'toCockpit')) this.cockpit.fire();
     });
     this.enterTitle();
@@ -192,13 +239,26 @@ export class ShooterScene implements GameScene {
     else if (this.phase === 'shmup') this.clampPlayer();
   }
 
-  update(dt: number): void {
-    this.stateTime += dt;
+  /** Simulation is stopped while the pause menu or a tutorial is open. */
+  private get frozen(): boolean {
+    return this.paused || this.tutorial.isOpen;
+  }
+
+  update(realDt: number): void {
     this.input.update();
+    if (this.frozen) {
+      this.input.consumeDrag(this.drag);
+      this.director.update(0, this.camera, this.playfield.cameraDistance, this.player.x, this.player.y, 0);
+      this.updateHud();
+      return;
+    }
+    // Cockpit Focus slows the whole world down, not just the fight.
+    const dt = realDt * this.cockpit.timeScale;
+    this.stateTime += realDt;
 
     const playing = this.state === 'playing';
     if (playing) {
-      this.updatePhase(dt);
+      this.updatePhase(realDt);
     } else {
       this.input.consumeDrag(this.drag);
       if (this.state === 'gameover' && !this.gameOverShown && this.stateTime > GAMEOVER_INPUT_DELAY) {
@@ -221,13 +281,13 @@ export class ShooterScene implements GameScene {
     this.warp.update(dt, blend, this.player.x, this.player.y, 45);
     this.playerBullets.sync();
     this.enemyBullets.sync();
-    this.shake = Math.max(0, this.shake - dt * 1.5);
-    this.director.update(dt, this.camera, this.playfield.cameraDistance, this.player.x, this.player.y, this.shake);
+    this.shake = Math.max(0, this.shake - realDt * 1.5);
+    this.director.update(realDt, this.camera, this.playfield.cameraDistance, this.player.x, this.player.y, this.shake);
     this.cockpitOverlay.setOpacity(this.cockpitHudOpacity(blend));
     this.cockpitOverlay.setLetterbox(this.director.letterbox);
-    this.cockpitOverlay.update(dt);
+    this.cockpitOverlay.update(realDt);
     if (this.messageTimer > 0) {
-      this.messageTimer -= dt;
+      this.messageTimer -= realDt;
       if (this.messageTimer <= 0) this.hud.hideMessage();
     }
     this.updateHud();
@@ -271,7 +331,7 @@ export class ShooterScene implements GameScene {
           this.setPhase('toCockpit');
           this.director.enterCockpit();
           this.audio.sfx.flyIn(COCKPIT.enterDuration);
-          this.audio.music.setCutoff(450, COCKPIT.enterDuration * 0.8);
+          this.setMusicCutoff(450, COCKPIT.enterDuration * 0.8);
           const pf = this.playfield;
           this.cockpit.start(this.player.x, this.player.y, this.spawner.wave, difficulty, pf.widthPx / pf.heightPx);
         }
@@ -282,8 +342,12 @@ export class ShooterScene implements GameScene {
       case 'cockpit':
         this.input.consumeDrag(this.drag);
         if (this.phase === 'toCockpit' && this.director.inCockpit) this.bootHud();
-        else if (this.phase === 'hudBoot' && this.phaseTime > COCKPIT.bootDuration) this.setPhase('cockpit');
+        else if (this.phase === 'hudBoot' && this.phaseTime > COCKPIT.bootDuration) this.startCockpitFight();
         this.endSectionIfDone(this.updateCockpit(dt));
+        if (this.cockpit.focusing !== this.wasFocusing) {
+          this.wasFocusing = this.cockpit.focusing;
+          this.setMusicCutoff(this.wasFocusing ? 900 : 20000, 0.25);
+        }
         break;
 
       case 'sectionEnd':
@@ -293,7 +357,7 @@ export class ShooterScene implements GameScene {
           this.setPhase('toShmup');
           this.director.exitCockpit();
           this.audio.sfx.flyOut(COCKPIT.exitDuration);
-          this.audio.music.setCutoff(500, COCKPIT.exitDuration * 0.5);
+          this.setMusicCutoff(500, COCKPIT.exitDuration * 0.5);
         }
         break;
 
@@ -307,12 +371,19 @@ export class ShooterScene implements GameScene {
     }
   }
 
+  private startCockpitFight(): void {
+    this.setPhase('cockpit');
+    if (this.cockpitTutorialDone) return;
+    this.cockpitTutorialDone = true;
+    this.tutorial.showIfWanted('cockpit', () => this.input.consumeDrag(this.drag));
+  }
+
   private bootHud(): void {
     this.setPhase('hudBoot');
     this.cockpitOverlay.powerOn(COCKPIT.bootDuration);
     this.audio.sfx.hudBoot(COCKPIT.bootDuration);
     this.audio.music.play(LOCK_ON, 0.4);
-    this.audio.music.setCutoff(20000, COCKPIT.bootDuration);
+    this.setMusicCutoff(20000, COCKPIT.bootDuration);
   }
 
   private updateCockpit(dt: number): SectionStatus {
@@ -348,8 +419,44 @@ export class ShooterScene implements GameScene {
     this.spawner.startWave();
     this.fireTimer = 0;
     this.audio.music.play(NOVA_DRIVE, 0.8);
-    this.audio.music.setCutoff(20000, 1.2);
+    this.setMusicCutoff(20000, 1.2);
     this.flashMessage(`WAVE ${this.spawner.wave}`, '', 1.4);
+  }
+
+  private setMusicCutoff(hz: number, seconds: number): void {
+    this.musicCutoff = hz;
+    this.audio.music.setCutoff(hz, seconds);
+  }
+
+  // --- Pause -----------------------------------------------------------------------------
+
+  private pause(): void {
+    if (this.paused || this.state !== 'playing' || this.tutorial.isOpen) return;
+    this.paused = true;
+    this.pauseMenu.show();
+    this.audio.music.setCutoff(600, 0.3);
+  }
+
+  private resume(): void {
+    if (!this.paused) return;
+    this.closePause();
+    this.input.consumeDrag(this.drag);
+    this.audio.music.setCutoff(this.musicCutoff, 0.3);
+  }
+
+  private closePause(): void {
+    this.paused = false;
+    this.pauseMenu.hide();
+  }
+
+  private quitToTitle(): void {
+    this.tutorial.cancel();
+    this.clearWorld();
+    this.cockpit.clear();
+    this.director.reset();
+    this.audio.music.stop(0.8);
+    this.messageTimer = 0;
+    this.enterTitle();
   }
 
   private setPhase(phase: Phase): void {
@@ -378,6 +485,11 @@ export class ShooterScene implements GameScene {
   // --- State transitions -------------------------------------------------------------
 
   private readonly handleTap = (): void => {
+    if (this.tutorial.isOpen) {
+      this.tutorial.dismiss();
+      return;
+    }
+    if (this.paused) return;
     if (this.state === 'title') this.startGame();
     else if (this.state === 'gameover' && this.stateTime > GAMEOVER_INPUT_DELAY) this.startGame();
   };
@@ -404,11 +516,14 @@ export class ShooterScene implements GameScene {
     this.spawner.reset();
     this.director.reset();
     this.cockpit.clear();
+    this.cockpitTutorialDone = false;
+    this.wasFocusing = false;
     this.placePlayerAtStart();
     this.input.consumeDrag(this.drag);
     this.hud.hideMessage();
     this.messageTimer = 0;
     this.startNextWave();
+    this.tutorial.showIfWanted('flight', () => this.input.consumeDrag(this.drag));
   }
 
   private gameOver(): void {
@@ -669,6 +784,7 @@ export class ShooterScene implements GameScene {
   // --- Presentation ----------------------------------------------------------------------
 
   private updateHud(): void {
+    this.pauseMenu.setButtonVisible(this.state === 'playing' && !this.frozen);
     this.hud.setWave(this.state === 'title' ? 0 : this.spawner.wave);
     this.hud.setScore(this.score);
     this.hud.setHiScore(Math.max(this.hiScore, this.score));

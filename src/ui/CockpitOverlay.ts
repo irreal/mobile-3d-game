@@ -18,6 +18,8 @@ export class CockpitOverlay {
   private readonly brush: HTMLDivElement;
   private readonly lockCount: HTMLDivElement;
   private readonly timerFill: HTMLDivElement;
+  private readonly focusFill: HTMLDivElement;
+  private readonly focusMeter: HTMLDivElement;
   private readonly callout: HTMLDivElement;
   private readonly hint: HTMLDivElement;
   private readonly flash: HTMLDivElement;
@@ -35,6 +37,13 @@ export class CockpitOverlay {
     const timer = div('cockpit-timer');
     this.timerFill = div('cockpit-timer-fill');
     timer.append(this.timerFill);
+    this.focusMeter = div('cockpit-focus');
+    const focusLabel = div('cockpit-focus-label');
+    focusLabel.textContent = 'FOCUS';
+    const focusTrack = div('cockpit-focus-track');
+    this.focusFill = div('cockpit-focus-fill');
+    focusTrack.append(this.focusFill);
+    this.focusMeter.append(focusLabel, focusTrack);
     this.callout = div('cockpit-callout');
     this.hint = div('cockpit-hint');
     this.hint.textContent = 'SWIPE OVER TARGETS TO LOCK · RELEASE TO FIRE';
@@ -49,6 +58,7 @@ export class CockpitOverlay {
       this.reticleLayer,
       this.brush,
       this.lockCount,
+      this.focusMeter,
       timer,
       this.callout,
       this.hint,
@@ -124,6 +134,13 @@ export class CockpitOverlay {
     this.brush.style.transform = `translate(${x}px, ${y}px)`;
   }
 
+  /** Focus meter level (0..1); `active` tints the view for the slow-mo. */
+  setFocus(level: number, active: boolean): void {
+    this.focusFill.style.transform = `scaleX(${level})`;
+    this.focusMeter.classList.toggle('empty', level <= 0.01);
+    this.root.classList.toggle('focusing', active);
+  }
+
   setTimer(fraction: number): void {
     this.timerFill.style.transform = `scaleX(${Math.max(0, fraction)})`;
     this.timerFill.classList.toggle('low', fraction < 0.25);
@@ -161,7 +178,7 @@ export class CockpitOverlay {
     this.callout.classList.remove('pop');
     this.calloutTimer = 0;
     this.bootTimer = 0;
-    this.root.classList.remove('booting');
+    this.root.classList.remove('booting', 'focusing');
   }
 }
 
