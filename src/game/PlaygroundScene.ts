@@ -55,7 +55,8 @@ export class PlaygroundScene implements GameScene {
     this.scene.add(this.sun, this.sun.target);
 
     const ground = new Mesh(
-      new PlaneGeometry(WORLD_SIZE, WORLD_SIZE),
+      // Larger than the playable area so its edge stays hidden in the fog.
+      new PlaneGeometry(WORLD_SIZE * 4, WORLD_SIZE * 4),
       new MeshStandardMaterial({ color: 0x6fa35a, roughness: 0.95 }),
     );
     ground.rotation.x = -Math.PI / 2;
