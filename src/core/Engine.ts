@@ -7,6 +7,8 @@ import { observeViewport, preventDefaultGestures } from './viewport.ts';
 export interface GameScene {
   readonly scene: Scene;
   update(dt: number, elapsed: number): void;
+  /** Called after the drawing buffer and camera aspect change (CSS pixel size). */
+  resize?(width: number, height: number): void;
   dispose?(): void;
 }
 
@@ -36,7 +38,7 @@ export class Engine {
     this.canvas.tabIndex = 0;
     container.appendChild(this.canvas);
 
-    this.camera = new PerspectiveCamera(config.camera.fovLandscape, 1, config.camera.near, config.camera.far);
+    this.camera = new PerspectiveCamera(config.camera.fov, 1, config.camera.near, config.camera.far);
 
     preventDefaultGestures(this.canvas);
     this.stopObservingViewport = observeViewport(container, () => {
@@ -49,6 +51,7 @@ export class Engine {
   setScene(scene: GameScene): void {
     this.activeScene?.dispose?.();
     this.activeScene = scene;
+    this.needsResize = true;
   }
 
   /** Subscribe to per-frame callbacks (e.g. HUD). Returns an unsubscribe function. */
@@ -70,8 +73,8 @@ export class Engine {
   }
 
   private readonly frame = (dt: number, elapsed: number): void => {
-    if (this.needsResize) this.resize();
     if (!this.activeScene) return;
+    if (this.needsResize) this.resize();
     this.activeScene.update(dt, elapsed);
     this.renderer.render(this.activeScene.scene, this.camera);
     this.frameListeners.forEach((fn) => fn(dt));
@@ -88,7 +91,7 @@ export class Engine {
     this.renderer.setSize(width, height, false);
 
     this.camera.aspect = aspect;
-    this.camera.fov = aspect < 1 ? config.camera.fovPortrait : config.camera.fovLandscape;
     this.camera.updateProjectionMatrix();
+    this.activeScene?.resize?.(width, height);
   }
 }

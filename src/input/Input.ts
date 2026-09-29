@@ -1,38 +1,51 @@
-import { ActionButton } from './ActionButton.ts';
 import { Keyboard } from './Keyboard.ts';
-import { VirtualJoystick } from './VirtualJoystick.ts';
 
-export interface MoveVector {
-  /** Right is +1. */
+export interface Vec2 {
   x: number;
-  /** Forward (up the screen / W key) is +1. */
   y: number;
 }
 
 /**
- * Unified game input: virtual joystick + jump button on touch devices,
- * WASD/arrows + Space on desktop. Game code reads `move` and calls `consumeJump()`.
+ * Game input for a shmup:
+ * - Relative drag: the ship follows the finger's *movement*, not its position, so the
+ *   finger can rest anywhere (typically below the ship) without covering it.
+ *   Works with touch, pen and mouse.
+ * - Keyboard: WASD / arrows for movement.
+ * - Taps (pointer down, Space, Enter) for menus.
  */
 export class Input {
-  readonly move: MoveVector = { x: 0, y: 0 };
+  /** Keyboard movement axis, each component in [-1, 1]; +y is up. */
+  readonly axis: Vec2 = { x: 0, y: 0 };
 
-  private readonly joystick: VirtualJoystick;
   private readonly keyboard = new Keyboard();
-  private jumpQueued = false;
+  private readonly tapListeners = new Set<() => void>();
+  private pointerId: number | null = null;
+  private lastX = 0;
+  private lastY = 0;
+  private dragX = 0;
+  private dragY = 0;
 
-  constructor(surface: HTMLElement, overlay: HTMLElement) {
-    this.joystick = new VirtualJoystick(surface, overlay);
-    new ActionButton(overlay, 'JUMP', this.queueJump);
-    this.keyboard.onPress('Space', this.queueJump);
+  constructor(private readonly surface: HTMLElement) {
+    surface.addEventListener('pointerdown', this.onDown);
+    surface.addEventListener('pointermove', this.onMove);
+    surface.addEventListener('pointerup', this.onUp);
+    surface.addEventListener('pointercancel', this.onUp);
+    surface.addEventListener('lostpointercapture', this.onUp);
+    this.keyboard.onPress('Space', this.emitTap);
+    this.keyboard.onPress('Enter', this.emitTap);
   }
 
-  /** Call once per frame before game logic reads `move`. */
+  get dragging(): boolean {
+    return this.pointerId !== null;
+  }
+
+  onTap(listener: () => void): () => void {
+    this.tapListeners.add(listener);
+    return () => this.tapListeners.delete(listener);
+  }
+
+  /** Call once per frame before reading `axis` / `consumeDrag`. */
   update(): void {
-    if (this.joystick.active) {
-      this.move.x = this.joystick.x;
-      this.move.y = this.joystick.y;
-      return;
-    }
     const k = this.keyboard;
     let x = (k.isDown('KeyD', 'ArrowRight') ? 1 : 0) - (k.isDown('KeyA', 'ArrowLeft') ? 1 : 0);
     let y = (k.isDown('KeyW', 'ArrowUp') ? 1 : 0) - (k.isDown('KeyS', 'ArrowDown') ? 1 : 0);
@@ -41,18 +54,54 @@ export class Input {
       x /= len;
       y /= len;
     }
-    this.move.x = x;
-    this.move.y = y;
+    this.axis.x = x;
+    this.axis.y = y;
   }
 
-  /** Returns true once per jump press, buffering presses shorter than a frame. */
-  consumeJump(): boolean {
-    const queued = this.jumpQueued;
-    this.jumpQueued = false;
-    return queued;
+  /** Drag distance in CSS pixels since the last call (+y is up the screen). */
+  consumeDrag(out: Vec2): Vec2 {
+    out.x = this.dragX;
+    out.y = this.dragY;
+    this.dragX = 0;
+    this.dragY = 0;
+    return out;
   }
 
-  private readonly queueJump = (): void => {
-    this.jumpQueued = true;
+  dispose(): void {
+    this.surface.removeEventListener('pointerdown', this.onDown);
+    this.surface.removeEventListener('pointermove', this.onMove);
+    this.surface.removeEventListener('pointerup', this.onUp);
+    this.surface.removeEventListener('pointercancel', this.onUp);
+    this.surface.removeEventListener('lostpointercapture', this.onUp);
+    this.keyboard.dispose();
+  }
+
+  private readonly emitTap = (): void => {
+    this.tapListeners.forEach((fn) => fn());
+  };
+
+  private readonly onDown = (e: PointerEvent): void => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    this.emitTap();
+    // Additional fingers are ignored while one is already steering.
+    if (this.pointerId !== null) return;
+    this.pointerId = e.pointerId;
+    this.surface.setPointerCapture(e.pointerId);
+    this.lastX = e.clientX;
+    this.lastY = e.clientY;
+  };
+
+  private readonly onMove = (e: PointerEvent): void => {
+    if (e.pointerId !== this.pointerId) return;
+    this.dragX += e.clientX - this.lastX;
+    this.dragY -= e.clientY - this.lastY;
+    this.lastX = e.clientX;
+    this.lastY = e.clientY;
+  };
+
+  private readonly onUp = (e: PointerEvent): void => {
+    if (e.pointerId !== this.pointerId) return;
+    this.pointerId = null;
   };
 }
