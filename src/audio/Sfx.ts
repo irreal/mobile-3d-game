@@ -213,11 +213,25 @@ export class Sfx {
   }
 
   /** A fighter dropping out of warp: descending zap plus a soft thump. */
-  warpIn(): void {
-    if (this.throttled('warpIn')) return;
-    this.a.tone({ type: 'sawtooth', freq: 2400, to: 180, duration: 0.28, gain: 0.05, filter: { type: 'lowpass', freq: 5000 } });
-    this.a.noise({ duration: 0.25, gain: 0.18, filter: { type: 'highpass', freq: 3000, to: 600 } });
-    this.a.tone({ freq: 120, to: 50, duration: 0.3, gain: 0.25 });
+  warpIn(time?: number): void {
+    if (this.throttled('warpIn', time)) return;
+    this.a.tone({ type: 'sawtooth', freq: 2400, to: 180, time, duration: 0.28, gain: 0.05, filter: { type: 'lowpass', freq: 5000 } });
+    this.a.noise({ time, duration: 0.25, gain: 0.18, filter: { type: 'highpass', freq: 3000, to: 600 } });
+    this.a.tone({ freq: 120, to: 50, time, duration: 0.3, gain: 0.25 });
+  }
+
+  /** An enemy's "call" in the call-and-response: a bell-like tone on `midi`, at `time`. */
+  call(midi: number, time?: number): void {
+    const freq = 440 * 2 ** ((midi - 69) / 12);
+    this.a.tone({ type: 'triangle', freq, time, duration: 0.3, gain: 0.12 });
+    this.a.tone({ type: 'sine', freq: freq * 2, time, duration: 0.18, gain: 0.05 });
+    this.a.tone({ type: 'triangle', freq, time, duration: 0.2, gain: 0.04, destination: this.a.echo });
+  }
+
+  /** Cockpit shield absorbs return fire. */
+  shieldHit(): void {
+    this.a.tone({ type: 'sine', freq: 900, to: 300, duration: 0.3, gain: 0.12 });
+    this.a.noise({ duration: 0.3, gain: 0.2, filter: { type: 'bandpass', freq: 1800, to: 500, q: 2 } });
   }
 
   /** Combo reached Overdrive. */

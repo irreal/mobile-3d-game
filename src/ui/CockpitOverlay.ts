@@ -1,14 +1,19 @@
-export type NoteStyle = 'strike' | 'heavy' | 'orb';
-export type Grade = 'perfect' | 'great' | 'good' | 'miss';
+export type NoteStyle = 'strike' | 'heavy' | 'call';
+export type Grade = 'perfect' | 'great' | 'good' | 'miss' | 'call';
+export type PhraseMode = 'watch' | 'repeat' | null;
 
 export interface NoteMarker {
   x: number;
   y: number;
   /** Radius of the target circle in CSS pixels. */
   size: number;
-  /** 1 when the approach ring appears, 0 when it closes (the moment to tap). */
-  approach: number;
+  /** 1 when the approach ring appears, 0 when it closes (the moment to tap); null for no ring. */
+  approach: number | null;
   style: NoteStyle;
+  /** Order in the sequence, shown inside the circle. */
+  label: string;
+  /** The next target to tap (others are dimmed). */
+  next: boolean;
 }
 
 export interface LaneNote {
@@ -35,6 +40,11 @@ export class CockpitOverlay {
   private readonly lane: HTMLDivElement;
   private readonly laneItems: HTMLDivElement[] = [];
   private readonly combo: HTMLDivElement;
+  private readonly phase: HTMLDivElement;
+  private readonly phaseLabel: HTMLDivElement;
+  private readonly phasePips: HTMLDivElement[] = [];
+  private readonly shield: HTMLDivElement;
+  private readonly shieldPips: HTMLDivElement[] = [];
   private readonly popups: HTMLDivElement[] = [];
   private readonly timerFill: HTMLDivElement;
   private readonly callout: HTMLDivElement;
@@ -56,12 +66,22 @@ export class CockpitOverlay {
     this.lane = div('cockpit-lane');
     this.lane.append(div('cockpit-lane-hit'));
     this.combo = div('cockpit-combo');
+    this.phase = div('cockpit-phase');
+    this.phaseLabel = div('cockpit-phase-label');
+    const pips = div('cockpit-phase-pips');
+    for (let i = 0; i < 4; i++) {
+      const pip = div('cockpit-phase-pip');
+      pips.append(pip);
+      this.phasePips.push(pip);
+    }
+    this.phase.append(this.phaseLabel, pips);
+    this.shield = div('cockpit-shield');
     const timer = div('cockpit-timer');
     this.timerFill = div('cockpit-timer-fill');
     timer.append(this.timerFill);
     this.callout = div('cockpit-callout');
     this.hint = div('cockpit-hint');
-    this.hint.textContent = 'TAP EACH TARGET AS ITS RING CLOSES · ON THE BEAT';
+    this.hint.textContent = 'WATCH THE SEQUENCE · THEN TAP IT BACK IN RHYTHM';
     this.flash = div('cockpit-flash');
     const popupLayer = div('cockpit-popups');
     for (let i = 0; i < POPUPS; i++) {
@@ -80,6 +100,8 @@ export class CockpitOverlay {
       popupLayer,
       this.lane,
       this.combo,
+      this.phase,
+      this.shield,
       timer,
       this.callout,
       this.hint,
@@ -131,7 +153,7 @@ export class CockpitOverlay {
   setNotes(markers: readonly NoteMarker[]): void {
     while (this.notes.length < markers.length) {
       const n = div('cockpit-note');
-      n.append(div('cockpit-note-ring'));
+      n.append(div('cockpit-note-ring'), div('cockpit-note-label'));
       this.noteLayer.append(n);
       this.notes.push(n);
     }
@@ -142,10 +164,17 @@ export class CockpitOverlay {
         return;
       }
       n.style.display = '';
-      n.className = `cockpit-note ${m.style}${m.approach < 0.12 ? ' now' : ''}`;
+      const now = m.approach !== null && m.approach < 0.12;
+      n.className = `cockpit-note ${m.style}${m.next ? ' next' : ''}${now ? ' now' : ''}`;
       n.style.transform = `translate(${m.x - m.size}px, ${m.y - m.size}px)`;
       n.style.width = n.style.height = `${m.size * 2}px`;
       const ring = n.firstChild as HTMLDivElement;
+      const label = n.lastChild as HTMLDivElement;
+      if (label.textContent !== m.label) label.textContent = m.label;
+      if (m.approach === null) {
+        ring.style.opacity = '0';
+        return;
+      }
       ring.style.transform = `scale(${1 + Math.max(0, m.approach) * 2.2})`;
       ring.style.opacity = String(Math.min(1, (1 - m.approach) * 4));
     });
@@ -210,6 +239,26 @@ export class CockpitOverlay {
     this.combo.classList.add('bump');
   }
 
+  /** WATCH / REPEAT indicator with one pip per beat of the current bar. */
+  setPhase(mode: PhraseMode, beatInBar: number): void {
+    this.phase.className = mode ? `cockpit-phase ${mode}` : 'cockpit-phase';
+    const text = mode === 'watch' ? 'WATCH' : mode === 'repeat' ? 'REPEAT' : '';
+    if (this.phaseLabel.textContent !== text) this.phaseLabel.textContent = text;
+    this.phasePips.forEach((p, i) => p.classList.toggle('on', mode !== null && i <= beatInBar));
+  }
+
+  setShield(level: number, max: number): void {
+    while (this.shieldPips.length < max) {
+      const pip = div('cockpit-shield-pip');
+      this.shield.append(pip);
+      this.shieldPips.push(pip);
+    }
+    this.shieldPips.forEach((p, i) => {
+      p.style.display = i < max ? '' : 'none';
+      p.classList.toggle('on', i < level);
+    });
+  }
+
   setTimer(fraction: number): void {
     this.timerFill.style.transform = `scaleX(${Math.max(0, fraction)})`;
     this.timerFill.classList.toggle('low', fraction < 0.25);
@@ -246,6 +295,7 @@ export class CockpitOverlay {
     for (const item of this.laneItems) item.style.display = 'none';
     for (const p of this.popups) p.classList.remove('pop');
     this.setCombo(0, 1, false);
+    this.setPhase(null, 0);
     this.callout.classList.remove('pop');
     this.calloutTimer = 0;
     this.bootTimer = 0;

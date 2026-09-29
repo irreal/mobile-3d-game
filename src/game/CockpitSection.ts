@@ -2,7 +2,7 @@ import { AdditiveBlending, Color, MathUtils, Mesh, MeshBasicMaterial, Vector3 } 
 import type { PerspectiveCamera, Scene } from 'three';
 import type { Music } from '../audio/Music.ts';
 import type { Sfx } from '../audio/Sfx.ts';
-import type { CockpitOverlay, Grade, LaneNote, NoteMarker, NoteStyle } from '../ui/CockpitOverlay.ts';
+import type { CockpitOverlay, Grade, LaneNote, NoteMarker, PhraseMode } from '../ui/CockpitOverlay.ts';
 import { COCKPIT } from './constants.ts';
 import type { Effects } from './Effects.ts';
 import { ENEMY_STATS } from './Enemy.ts';
@@ -18,50 +18,54 @@ interface Fighter {
   position: Vector3;
   radius: number;
   hp: number;
-  /** Notes waiting to be tapped plus rockets in flight at this fighter. */
-  allocated: number;
+  /** Rockets in flight at this fighter. */
+  inFlight: number;
   alive: boolean;
   start: Vector3;
   hover: Vector3;
-  /** Seconds before it starts flying in. */
-  delay: number;
-  /** Reinforcement round (0-based) this fighter warps in with. */
-  round: number;
-  age: number;
+  /** Beat its warp exit starts; it flashes into view on `arriveBeat`. */
+  warpStartBeat: number;
+  arriveBeat: number;
+  visible: boolean;
+  warpedIn: boolean;
+  /** Warping back out (missed, or the strike is over); seconds since it started leaving. */
+  leaving: number | null;
   phase: number;
   flash: number;
   /** Speed streak shown while dropping out of warp. */
   streak: Mesh | null;
-  warpedIn: boolean;
-  /** Sideways dodge after a missed note: seconds left and direction. */
-  jink: number;
-  jinkDir: number;
 }
 
-interface Orb {
-  mesh: Mesh;
-  from: Vector3;
-  /** Point in front of the canopy the orb reaches on its note beat. */
-  judge: Vector3;
-  fireBeat: number;
-  beat: number;
-  /** Not shot down in time: it keeps coming and hits the cockpit. */
-  missed: boolean;
-}
-
+/** One enemy in a phrase: it calls on `callBeat`, and must be tapped on `callBeat + 4`. */
 interface Note {
-  kind: 'strike' | 'orb';
-  beat: number;
-  /** Strike: the target. Orb: the shooter. */
   fighter: Fighter;
-  /** Orb notes: beat the orb launches, and the orb once launched. */
-  fireBeat: number;
-  orb: Orb | null;
+  callBeat: number;
+  beat: number;
+  order: number;
+  phrase: Phrase;
+  callSounded: boolean;
+  called: boolean;
+  judged: boolean;
+  missed: boolean;
   /** Screen position from the last overlay update, used to hit-test taps. */
   sx: number;
   sy: number;
   sr: number;
   onScreen: boolean;
+}
+
+/** Two bars: the call bar starting at `start`, then the response bar. */
+interface Phrase {
+  start: number;
+  notes: Note[];
+  resolved: boolean;
+}
+
+/** Return fire from enemies that weren't hit; lands on `hitBeat`. */
+interface Volley {
+  bolts: { mesh: Mesh; from: Vector3 }[];
+  fireBeat: number;
+  hitBeat: number;
 }
 
 interface Rocket {
@@ -77,11 +81,11 @@ interface Rocket {
   lethal: boolean;
 }
 
-export type SectionStatus = 'running' | 'cleared' | 'escaped';
+export type SectionStatus = 'running' | 'cleared';
 
 export interface CockpitFrame {
   camera: PerspectiveCamera;
-  /** Unshaken eye position; orbs aim here. */
+  /** Unshaken eye position; return fire aims here. */
   eye: Vector3;
   /** True once the camera has fully arrived in the cockpit. */
   active: boolean;
@@ -97,37 +101,43 @@ export interface CockpitCallbacks {
 }
 
 const COCKPIT_SCORE: Record<EnemyKind, number> = { grunt: 200, weaver: 250, tank: 1200 };
-const NOTE_SCORE: Record<Exclude<Grade, 'miss'>, number> = { perfect: 100, great: 70, good: 40 };
-const GRADE_LABEL: Record<Grade, string> = { perfect: 'PERFECT', great: 'GREAT', good: 'GOOD', miss: 'MISS' };
-/** Notes (hits) each kind takes to destroy. */
-const FIGHTER_HP: Record<EnemyKind, number> = { grunt: 1, weaver: 2, tank: 4 };
+const NOTE_SCORE: Record<'perfect' | 'great' | 'good', number> = { perfect: 100, great: 70, good: 40 };
+const GRADE_LABEL: Record<Exclude<Grade, 'call'>, string> = {
+  perfect: 'PERFECT',
+  great: 'GREAT',
+  good: 'GOOD',
+  miss: 'MISS',
+};
 /**
- * Rhythm per bar in 8th notes ('x' = note), by difficulty level. Levels rise with each
- * strike and again for the final reinforcement round.
+ * Call rhythms per bar in 8th notes ('x' = an enemy calls), by difficulty level. The
+ * level rises with each strike and again halfway through a strike.
  */
 const PATTERNS: readonly (readonly string[])[] = [
-  ['x...x...', 'x...x.x.', 'x...x...', 'x.x.x...'],
-  ['x.x.x...', 'x...x.x.', 'x.x...x.', 'x...x.xx'],
-  ['x.x.x.x.', 'x.x.xx..', 'x..xx.x.', 'x.xx.xx.'],
-  ['x.xxx.x.', 'x.x.x.xx', 'xx.xx.x.', 'x.xxx.xx'],
+  ['x...x...', 'x.x.x...', 'x...x.x.', 'x.x.....'],
+  ['x.x.x...', 'x.x.x.x.', 'x..x..x.', 'xx..x...', 'x...x.x.'],
+  ['x.x.x.x.', 'x.xx.x..', 'xx.x.x..', 'x.x.xx..', 'x..xx.x.'],
+  ['x.xxx.x.', 'xx.xx.x.', 'x.x.xxx.', 'xxx.x.x.', 'x.xx.xx.'],
 ];
+/** Hits a heavy takes; it stays and joins one call per phrase until destroyed. */
+const HEAVY_HP = 2;
 /** Fallback tempo when there is no music clock (no Web Audio). Matches LOCK_ON. */
 const FALLBACK_BPM = 146;
 /** Rockets fly at least this many beats, then land on the next 8th note. */
 const MIN_FLIGHT_BEATS = 0.45;
-/** Beats a missed orb takes from its judge point to the canopy. */
-const ORB_HIT_BEATS = 0.6;
-const JINK_TIME = 0.45;
+/** Beats of warp exit before a fighter flashes into view on its call, and after. */
+const WARP_LEAD_BEATS = 0.75;
+const WARP_BEATS = 1.6;
+/** Beats return fire takes to reach the cockpit. */
+const VOLLEY_BEATS = 1.5;
 const FIGHTER_SCALE = 1.4;
 /** Pitch toward the cockpit so the ships show their top silhouette while facing you. */
 const FIGHTER_PITCH = 0.95;
-/** Seconds a fighter takes to drop out of warp into its hover spot. */
-const WARP_IN_TIME = 0.8;
 /** How far ahead fighters start their warp exit. */
 const WARP_IN_DISTANCE = 80;
+const FIGHTER_DEPTH = 20;
+const HEAVY_DEPTH = 27;
 const WARP_FLASH_COLORS = [0x9fe8ff, 0xffffff, 0x6ff3ff];
-const ORB_RADIUS = 0.32;
-const ORB_COLORS = [0xff4f8b, 0xffffff];
+const BOLT_COLORS = [0xff4f8b, 0xffffff];
 const GOLD_COLORS = [0xffd23d, 0xffffff, 0xff8a3d];
 const EXPLOSION_COLORS: Record<EnemyKind, readonly number[]> = {
   grunt: [0xff5a36, 0xffb443, 0xffffff, 0xff2d55],
@@ -139,21 +149,22 @@ const tmp = new Vector3();
 const tmp2 = new Vector3();
 
 /**
- * First-person "strike" fight between waves, played as a rhythm game locked to the
- * cockpit music. Targets get notes on an 8th-note grid; an approach ring closes onto the
- * target and the player taps it on the beat. Each hit fires a rocket that lands (and
- * explodes) exactly on a following 8th note. Heavies take several notes. Fighters fire
- * plasma orbs that arrive on a beat and must be tapped too; a missed note makes the
- * fighter dodge and shoot back. Consecutive hits build a combo up to Overdrive.
+ * First-person "strike" fight between waves: a call-and-response rhythm game locked to
+ * the cockpit music. Each phrase is two bars. In the call bar, enemies drop out of warp
+ * one by one on a rhythm, each with its own tone. In the response bar the player taps
+ * them back in the same order and rhythm (numbered circles and a ring on the next one
+ * help). Each hit fires a rocket that lands and explodes on a following 8th note.
+ * Enemies that weren't hit fire back at the end of the phrase (draining the shield,
+ * then lives) and warp away. Heavies stay and join the next call until destroyed.
  */
 export class CockpitSection {
   private readonly fighters: Fighter[] = [];
-  private readonly orbs: Orb[] = [];
-  private readonly notes: Note[] = [];
+  private readonly phrases: Phrase[] = [];
+  private readonly volleys: Volley[] = [];
   private readonly rockets: Rocket[] = [];
   private readonly markers: NoteMarker[] = [];
   private readonly lane: LaneNote[] = [];
-  private readonly orbMaterial = createGlowMaterial({ size: 1.5, intensity: 1.8, core: 0.35, color: [1, 0.3, 0.55] });
+  private readonly boltMaterial = createGlowMaterial({ size: 1.5, intensity: 1.8, core: 0.35, color: [1, 0.3, 0.55] });
   private readonly rocketMaterial = new MeshBasicMaterial({ color: new Color(0xfff1c9).multiplyScalar(1.4) });
   private readonly goldMaterial = new MeshBasicMaterial({ color: new Color(0xffd23d).multiplyScalar(1.8) });
   private readonly streakMaterial = new MeshBasicMaterial({
@@ -164,28 +175,27 @@ export class CockpitSection {
     depthWrite: false,
   });
 
-  private anchor = new Vector3();
+  private readonly anchor = new Vector3();
   private readonly eye = new Vector3();
-  private wave = 1;
-  private activeTime = 0;
-  private fleeing = false;
-  private round = 0;
-  private roundStart = 0;
-  private roundSizes: number[] = [];
+  private strike = 1;
+  private aspect = 1;
   private running = false;
   private active = false;
-  private alarmPlayed = false;
   private widthPx = 1;
   private heightPx = 1;
   /** Song position in beats as heard now. */
   private beat = 0;
   private fallbackOrigin = 0;
   private resyncPending = false;
-  /** Start beat of the next bar to chart, or NaN before the first one. */
-  private nextBar = Number.NaN;
-  private barCount = 0;
-  private lastTarget: Fighter | null = null;
+  /** Start beat of the next phrase to plan, or NaN before the first one. */
+  private nextPhrase = Number.NaN;
+  private phraseCount = 0;
+  private totalPhrases = 0;
   private launchSide = 1;
+  private shield: number = COCKPIT.shield;
+  private notesTotal = 0;
+  private notesHit = 0;
+  private lastFrame: CockpitFrame | null = null;
   combo = 0;
   maxCombo = 0;
 
@@ -198,12 +208,13 @@ export class CockpitSection {
     private readonly callbacks: CockpitCallbacks,
   ) {}
 
-  get timeLeft(): number {
-    return Math.max(0, COCKPIT.timeLimit - this.activeTime);
-  }
-
   get overdrive(): boolean {
     return this.combo >= COCKPIT.overdriveCombo;
+  }
+
+  /** Fraction of notes hit this strike (1 when there were none). */
+  get accuracy(): number {
+    return this.notesTotal > 0 ? this.notesHit / this.notesTotal : 1;
   }
 
   private get multiplier(): number {
@@ -214,61 +225,28 @@ export class CockpitSection {
     return 60000 / (this.music.playing?.bpm ?? FALLBACK_BPM);
   }
 
-  /** Spawns the squadron ahead of the ship at (`shipX`, `shipY`). */
-  /** `strike` is the 1-based count of cockpit strikes this game (drives squadron size and rhythm). */
+  /** Prepares strike number `strike` (1-based) ahead of the ship at (`shipX`, `shipY`). */
   start(shipX: number, shipY: number, strike: number, aspect: number): void {
     this.clear();
     this.running = true;
     this.anchor.set(shipX, shipY, 0);
-    this.wave = strike;
-    this.round = 0;
-    this.roundStart = 0;
-    this.activeTime = 0;
-    this.fleeing = false;
-    this.alarmPlayed = false;
+    this.strike = strike;
+    this.aspect = aspect;
+    this.totalPhrases = COCKPIT.phrases + COCKPIT.phrasesPerStrike * (strike - 1);
+    this.shield = COCKPIT.shield;
     this.fallbackOrigin = performance.now();
     this.beat = this.rawBeat(performance.now());
-
-    const rounds: EnemyKind[][] = [];
-    for (let r = 0; r < COCKPIT.rounds; r++) {
-      const kinds: EnemyKind[] = [];
-      const small = Math.min(3 + strike + r, 8);
-      for (let i = 0; i < small; i++) kinds.push(i % 3 === 2 ? 'weaver' : 'grunt');
-      // Heavies join in later rounds, and in every round from the third strike on.
-      const tanks = r === COCKPIT.rounds - 1 ? Math.min(strike, 2) : strike >= 3 && r > 0 ? 1 : 0;
-      for (let i = 0; i < tanks; i++) kinds.splice(MathUtils.randInt(0, kinds.length), 0, 'tank');
-      rounds.push(kinds);
-    }
-    this.roundSizes = rounds.map((k) => k.length);
-
-    const tanHalfFov = Math.tan(MathUtils.degToRad(COCKPIT.fov / 2));
-    rounds.forEach((kinds, round) => kinds.forEach((kind, i) => {
-      const depth = MathUtils.randFloat(15, 30);
-      // Keep hover spots inside the view at that depth; portrait screens are narrow.
-      const halfH = depth * tanHalfFov;
-      const rangeX = Math.min(7, halfH * aspect * 0.7 - 1.5);
-      const rangeZ = Math.min(5, halfH * 0.5 - 1);
-      const hover = new Vector3(
-        shipX + MathUtils.randFloatSpread(2 * Math.max(rangeX, 0.5)),
-        shipY + depth,
-        MathUtils.randFloatSpread(2 * Math.max(rangeZ, 0.5)) + 0.8,
-      );
-      // Straight down the line of sight, so the warp exit reads as coming from the vanishing point.
-      const start = hover.clone().add(tmp.set(0, WARP_IN_DISTANCE, 0));
-      // Later rounds get their warp-in time when the round is triggered.
-      this.spawnFighter(kind, start, hover, round === 0 ? 0.15 + i * 0.16 : Infinity, round);
-    }));
   }
 
   /** Handles a press at CSS pixel (`x`, `y`) at time `perfMs` (performance.now() time base). */
   tap(x: number, y: number, perfMs: number): void {
-    if (!this.running || !this.active || this.fleeing) return;
+    if (!this.running || !this.active) return;
     const tapBeat = this.rawBeat(perfMs + COCKPIT.inputOffsetMs);
     const beatMs = this.beatMs;
     const minRadius = COCKPIT.hitRadius * Math.min(this.widthPx, this.heightPx);
     let best: Note | null = null;
     let bestError = Infinity;
-    for (const n of this.notes) {
+    for (const n of this.pendingNotes()) {
       if (!n.onScreen) continue;
       const error = (tapBeat - n.beat) * beatMs;
       if (error < -COCKPIT.earlyMissMs || error > COCKPIT.goodMs) continue;
@@ -285,19 +263,20 @@ export class CockpitSection {
       this.missNote(best, 'EARLY');
       return;
     }
-    const grade: Grade = off <= COCKPIT.perfectMs ? 'perfect' : off <= COCKPIT.greatMs ? 'great' : 'good';
+    const grade = off <= COCKPIT.perfectMs ? 'perfect' : off <= COCKPIT.greatMs ? 'great' : 'good';
     this.hitNote(best, grade, tapBeat);
   }
 
-  /** Destroys all orbs in flight and cancels queued ones (used when the player takes a hit). */
+  /** Cancels return fire in flight (used when the player takes a hit). */
   popOrbs(): void {
-    for (const orb of this.orbs) {
-      const p = orb.mesh.position;
-      this.effects.explode(p.x, p.y, ORB_COLORS, 6, 4, 0.35, p.z);
-      this.scene.remove(orb.mesh);
+    for (const v of this.volleys) {
+      for (const b of v.bolts) {
+        const p = b.mesh.position;
+        this.effects.explode(p.x, p.y, BOLT_COLORS, 6, 4, 0.35, p.z);
+        this.scene.remove(b.mesh);
+      }
     }
-    this.orbs.length = 0;
-    this.removeNotes((n) => n.kind === 'orb');
+    this.volleys.length = 0;
   }
 
   update(dt: number, frame: CockpitFrame): SectionStatus {
@@ -308,47 +287,43 @@ export class CockpitSection {
     this.heightPx = frame.heightPx;
     this.advanceClock();
 
-    if (frame.active) this.activeTime += dt;
-    if (!this.fleeing && this.activeTime >= COCKPIT.timeLimit) this.flee();
-    if (!this.fleeing && !this.alarmPlayed && this.timeLeft < 5) {
-      this.alarmPlayed = true;
-      this.sfx.alarm();
-    }
-
-    if (frame.active) {
-      this.updateRounds();
-      this.updateChart();
-    }
+    if (frame.active) this.planPhrases();
+    this.updateCalls();
     this.updateFighters(dt);
     this.updateNotes();
-    if (this.updateOrbs()) {
-      // May end the game, which clears this section.
-      this.callbacks.playerHit();
-      if (!this.running) return 'running';
-    }
+    this.resolvePhrases();
+    this.updateVolleys();
+    // Return fire may end the game, which clears this section.
+    if (!this.running) return 'running';
     this.updateRockets();
     this.updateOverlay(frame);
 
-    if (this.fighters.length === 0 && this.rockets.length === 0) {
+    const done =
+      this.phraseCount >= this.totalPhrases &&
+      this.phrases.length === 0 &&
+      this.fighters.length === 0 &&
+      this.rockets.length === 0 &&
+      this.volleys.length === 0;
+    if (done) {
       this.running = false;
-      return this.fleeing ? 'escaped' : 'cleared';
+      return 'cleared';
     }
     return 'running';
   }
 
   clear(): void {
     for (const f of this.fighters) this.removeFighterModel(f);
-    for (const o of this.orbs) this.scene.remove(o.mesh);
     for (const r of this.rockets) this.scene.remove(r.mesh);
+    this.popOrbs();
     this.fighters.length = 0;
-    this.orbs.length = 0;
-    this.notes.length = 0;
+    this.phrases.length = 0;
     this.rockets.length = 0;
     this.running = false;
     this.active = false;
-    this.nextBar = Number.NaN;
-    this.barCount = 0;
-    this.lastTarget = null;
+    this.nextPhrase = Number.NaN;
+    this.phraseCount = 0;
+    this.notesTotal = 0;
+    this.notesHit = 0;
     this.combo = 0;
     this.maxCombo = 0;
     this.overlay.reset();
@@ -356,13 +331,13 @@ export class CockpitSection {
 
   dispose(): void {
     this.clear();
-    this.orbMaterial.dispose();
+    this.boltMaterial.dispose();
     this.rocketMaterial.dispose();
     this.goldMaterial.dispose();
     this.streakMaterial.dispose();
   }
 
-  // --- Beat clock and chart ------------------------------------------------------------
+  // --- Beat clock ----------------------------------------------------------------------
 
   /** Song beat heard at `perfMs`; a steady internal clock when there is no music. */
   private rawBeat(perfMs: number): number {
@@ -371,8 +346,8 @@ export class CockpitSection {
 
   /**
    * Call when the simulation resumes after being frozen (pause menu, tutorial). The music
-   * keeps playing meanwhile, so the chart is pushed back by whole bars on the next update:
-   * nothing is missed and it stays on the music's grid.
+   * keeps playing meanwhile, so the chart is pushed back by whole phrases on the next
+   * update: nothing is missed and it stays on the music's grid.
    */
   resync(): void {
     this.resyncPending = true;
@@ -381,20 +356,27 @@ export class CockpitSection {
   private advanceClock(): void {
     const now = this.rawBeat(performance.now());
     const gap = now - this.beat;
-    if (this.resyncPending && gap > 0.5 && !Number.isNaN(this.nextBar)) this.shiftChart(Math.ceil(gap / 4) * 4);
+    if (this.resyncPending && gap > 0.5 && !Number.isNaN(this.nextPhrase)) this.shiftChart(Math.ceil(gap / 8) * 8);
     this.resyncPending = false;
     this.beat = now;
   }
 
   private shiftChart(beats: number): void {
-    this.nextBar += beats;
-    for (const n of this.notes) {
-      n.beat += beats;
-      n.fireBeat += beats;
+    this.nextPhrase += beats;
+    for (const p of this.phrases) {
+      p.start += beats;
+      for (const n of p.notes) {
+        n.callBeat += beats;
+        n.beat += beats;
+      }
     }
-    for (const o of this.orbs) {
-      o.fireBeat += beats;
-      o.beat += beats;
+    for (const f of this.fighters) {
+      f.warpStartBeat += beats;
+      f.arriveBeat += beats;
+    }
+    for (const v of this.volleys) {
+      v.fireBeat += beats;
+      v.hitBeat += beats;
     }
     for (const r of this.rockets) {
       r.launchBeat += beats;
@@ -402,110 +384,162 @@ export class CockpitSection {
     }
   }
 
-  /** Charts upcoming bars about a bar ahead, so notes show up on the lane in time. */
-  private updateChart(): void {
-    if (this.fleeing) return;
-    if (Number.isNaN(this.nextBar)) this.nextBar = Math.ceil((this.beat + COCKPIT.approachBeats + 0.5) / 4) * 4;
-    while (this.beat >= this.nextBar - 4) {
-      this.chartBar(this.nextBar);
-      this.nextBar += 4;
+  // --- Phrases -------------------------------------------------------------------------
+
+  /** Plans each phrase a little ahead, so fighters can start their warp exit in time. */
+  private planPhrases(): void {
+    if (Number.isNaN(this.nextPhrase)) this.nextPhrase = Math.ceil((this.beat + 1.5) / 4) * 4;
+    while (this.phraseCount < this.totalPhrases && this.beat >= this.nextPhrase - 2) {
+      this.planPhrase(this.nextPhrase);
+      this.nextPhrase += 8;
     }
   }
 
-  private chartBar(start: number): void {
-    const level = Math.min(PATTERNS.length - 1, this.wave - 1 + (this.round >= COCKPIT.rounds - 1 ? 1 : 0));
+  private planPhrase(start: number): void {
+    const index = this.phraseCount++;
+    const level = Math.min(PATTERNS.length - 1, this.strike - 1 + (index >= this.totalPhrases / 2 ? 1 : 0));
     const options = PATTERNS[level]!;
-    const pattern = options[this.barCount++ % options.length]!;
+    const pattern = options[MathUtils.randInt(0, options.length - 1)]!;
+    const slots = [...pattern].flatMap((c, i) => (c === 'x' ? [i] : []));
+    const phrase: Phrase = { start, notes: [], resolved: false };
 
-    // Most bars also carry one incoming orb on a rest, more often later on.
-    const orbChance = Math.min(0.25 + 0.15 * (this.wave - 1) + 0.1 * this.round, 0.75);
-    const rests = [...pattern].flatMap((c, i) => (c === '.' ? [i] : []));
-    const orbSlot = this.barCount > 1 && rests.length > 0 && Math.random() < orbChance
-      ? rests[MathUtils.randInt(0, rests.length - 1)]!
-      : -1;
+    // A heavy already on the field joins this call; from the 2nd strike new ones show up.
+    let heavy = this.fighters.find((f) => f.alive && f.kind === 'tank' && f.leaving === null) ?? null;
+    const phrasesLeft = this.totalPhrases - index;
+    const heavyDue = this.strike >= 2 && index % 3 === 1 && phrasesLeft >= HEAVY_HP;
+    const heavySlot = heavy || heavyDue ? MathUtils.randInt(0, slots.length - 1) : -1;
+    const smallCount = slots.length - (heavySlot >= 0 ? 1 : 0);
+    const spots = this.layoutSpots(smallCount, heavySlot >= 0);
+    // Early on the sequence reads left to right; later it jumps around.
+    if (level >= 2) shuffle(spots);
 
-    let prev = this.lastTarget;
-    for (let i = 0; i < pattern.length; i++) {
-      const beat = start + i * 0.5;
-      if (this.slotTaken(beat)) continue;
-      if (i === orbSlot) {
-        const shooter = this.notes.some((n) => n.kind === 'orb') ? null : this.randomShooter();
-        if (shooter) this.addOrbNote(shooter, beat);
-        continue;
+    let spot = 0;
+    slots.forEach((slot, order) => {
+      const callBeat = start + slot * 0.5;
+      let fighter: Fighter;
+      if (order === heavySlot) {
+        heavy ??= this.spawnFighter('tank', this.heavySpot(), callBeat);
+        fighter = heavy;
+      } else {
+        fighter = this.spawnFighter(order % 3 === 2 ? 'weaver' : 'grunt', spots[spot++]!, callBeat);
       }
-      if (pattern[i] !== 'x') continue;
-      const target = this.pickTarget(prev);
-      if (!target) continue;
-      target.allocated++;
-      this.notes.push(this.makeNote('strike', beat, target));
-      prev = target;
-    }
-    this.lastTarget = prev;
+      phrase.notes.push({
+        fighter,
+        callBeat,
+        beat: callBeat + 4,
+        order,
+        phrase,
+        callSounded: false,
+        called: false,
+        judged: false,
+        missed: false,
+        sx: 0,
+        sy: 0,
+        sr: 0,
+        onScreen: false,
+      });
+    });
+    this.notesTotal += phrase.notes.length;
+    this.phrases.push(phrase);
   }
 
-  /** Keeps hitting the same target until it has enough notes, then moves to the nearest. */
-  private pickTarget(prev: Fighter | null): Fighter | null {
-    let best: Fighter | null = null;
-    let bestDist = Infinity;
-    for (const f of this.fighters) {
-      if (!f.alive || !f.warpedIn || f.hp - f.allocated <= 0) continue;
-      if (f === prev) return f;
-      const d = prev ? f.hover.distanceToSquared(prev.hover) : Math.random();
-      if (d < bestDist) {
-        best = f;
-        bestDist = d;
+  /** Hover spots in one or two rows that keep targets apart on screen. */
+  private layoutSpots(count: number, withHeavy: boolean): Vector3[] {
+    const tanHalfFov = Math.tan(MathUtils.degToRad(COCKPIT.fov / 2));
+    const halfH = FIGHTER_DEPTH * tanHalfFov;
+    const halfW = halfH * this.aspect;
+    const rangeX = Math.max(1.2, Math.min(halfW * 0.78 - 1.4, 8));
+    const minGap = 3;
+    const rows = count > 1 && (2 * rangeX) / (count - 1) < minGap ? 2 : 1;
+    const rowZ = rows === 1 ? [withHeavy ? -0.6 : 0.8] : withHeavy ? [0.4, -3] : [2.6, -1.2];
+    const spots: Vector3[] = [];
+    for (let r = 0; r < rows; r++) {
+      const inRow = rows === 1 ? count : r === 0 ? Math.ceil(count / 2) : Math.floor(count / 2);
+      for (let i = 0; i < inRow; i++) {
+        const t = inRow === 1 ? 0.5 : i / (inRow - 1);
+        // Stagger the second row so no target sits right below another.
+        const x = inRow === 1 ? (rows === 2 ? (r === 0 ? -0.35 : 0.35) * rangeX : 0) : MathUtils.lerp(-rangeX, rangeX, t) * (r === 1 ? 0.75 : 1);
+        spots.push(new Vector3(
+          this.anchor.x + x + MathUtils.randFloatSpread(0.4),
+          this.anchor.y + FIGHTER_DEPTH + MathUtils.randFloatSpread(2),
+          rowZ[r]! + MathUtils.randFloatSpread(0.5),
+        ));
       }
     }
-    return best;
+    return spots;
   }
 
-  private randomShooter(): Fighter | null {
-    const ready = this.fighters.filter((f) => f.alive && f.warpedIn && f.age > WARP_IN_TIME);
-    return ready.length > 0 ? ready[MathUtils.randInt(0, ready.length - 1)]! : null;
+  private heavySpot(): Vector3 {
+    const halfH = HEAVY_DEPTH * Math.tan(MathUtils.degToRad(COCKPIT.fov / 2));
+    return new Vector3(this.anchor.x, this.anchor.y + HEAVY_DEPTH, Math.min(halfH * 0.42, 6.5));
   }
 
-  private slotTaken(beat: number): boolean {
-    return this.notes.some((n) => Math.abs(n.beat - beat) < 0.26);
-  }
-
-  private makeNote(kind: Note['kind'], beat: number, fighter: Fighter): Note {
-    return { kind, beat, fighter, fireBeat: beat, orb: null, sx: 0, sy: 0, sr: 0, onScreen: false };
-  }
-
-  /** Schedules an orb from `shooter` that has to be shot down on `beat`. */
-  private addOrbNote(shooter: Fighter, beat: number): void {
-    const note = this.makeNote('orb', beat, shooter);
-    note.fireBeat = Math.max(beat - COCKPIT.orbBeats, this.beat);
-    this.notes.push(note);
-  }
-
-  /** First free 8th-note slot at or after `beat`. */
-  private freeSlot(beat: number): number {
-    let slot = Math.ceil(beat * 2) / 2;
-    while (this.slotTaken(slot)) slot += 0.5;
-    return slot;
-  }
-
-  // --- Notes ---------------------------------------------------------------------------
-
-  /** Launches due orbs and misses notes whose window has passed. */
-  private updateNotes(): void {
-    const lateBeats = COCKPIT.goodMs / this.beatMs;
-    for (let i = this.notes.length - 1; i >= 0; i--) {
-      const n = this.notes[i]!;
-      if (n.kind === 'orb' && !n.orb && this.beat >= n.fireBeat) {
-        if (!n.fighter.alive) {
-          this.notes.splice(i, 1);
+  /** Schedules call sounds on the music clock and shows each call as it happens. */
+  private updateCalls(): void {
+    for (const p of this.phrases) {
+      for (const n of p.notes) {
+        if (!n.fighter.alive && !n.judged) {
+          // A heavy destroyed before its next call: that note is dropped.
+          n.judged = n.called = n.callSounded = true;
+          this.notesTotal--;
           continue;
         }
-        n.orb = this.launchOrb(n);
+        if (!n.callSounded && this.beat >= n.callBeat - 0.5) {
+          n.callSounded = true;
+          const time = this.music.timeOfBeat(n.callBeat) ?? undefined;
+          this.sfx.call(this.toneFor(n.order, n.callBeat), time);
+          if (!n.fighter.warpedIn && n.fighter.arriveBeat === n.callBeat) this.sfx.warpIn(time);
+        }
+        if (!n.called && this.beat >= n.callBeat) {
+          n.called = true;
+          const f = n.fighter;
+          if (f.warpedIn) {
+            // Already on the field (a heavy): it pulses instead of warping in.
+            f.flash = 0.12;
+            this.effects.ring(f.position.x, f.position.y, f.position.z, 0x9fe8ff, 5, 0.35, true);
+          }
+          const s = this.projectFighter(f);
+          if (s) this.overlay.judgement(String(n.order + 1), 'call', s.x, s.y - s.r - 12);
+        }
       }
+    }
+  }
+
+  private *pendingNotes(): Generator<Note> {
+    for (const p of this.phrases) for (const n of p.notes) if (!n.judged && n.fighter.alive) yield n;
+  }
+
+  /** Misses notes whose window has passed. */
+  private updateNotes(): void {
+    const lateBeats = COCKPIT.goodMs / this.beatMs;
+    for (const n of this.pendingNotes()) {
       if (this.beat > n.beat + lateBeats) this.missNote(n, 'MISS');
     }
   }
 
-  private hitNote(note: Note, grade: Exclude<Grade, 'miss'>, tapBeat: number): void {
-    this.removeNote(note);
+  /** At the end of a phrase, enemies that weren't hit fire back and warp away. */
+  private resolvePhrases(): void {
+    for (let i = this.phrases.length - 1; i >= 0; i--) {
+      const p = this.phrases[i]!;
+      const end = p.start + 8;
+      if (this.beat < end) continue;
+      if (!p.resolved) {
+        p.resolved = true;
+        const standing = (f: Fighter): boolean => f.alive && f.hp - f.inFlight > 0;
+        const shooters = unique(p.notes.filter((n) => n.missed).map((n) => n.fighter)).filter(standing);
+        if (shooters.length > 0) this.fireVolley(shooters, end);
+        for (const f of unique(p.notes.map((n) => n.fighter)).filter(standing)) {
+          const callsAgain = this.phrases.some((q) => q !== p && q.notes.some((n) => n.fighter === f));
+          if (!callsAgain) this.leave(f);
+        }
+      }
+      this.phrases.splice(i, 1);
+    }
+  }
+
+  private hitNote(note: Note, grade: 'perfect' | 'great' | 'good', tapBeat: number): void {
+    note.judged = true;
+    this.notesHit++;
     this.combo++;
     this.maxCombo = Math.max(this.maxCombo, this.combo);
     if (this.combo === COCKPIT.overdriveCombo) {
@@ -514,146 +548,96 @@ export class CockpitSection {
     }
     this.callbacks.addScore(Math.round(NOTE_SCORE[grade] * this.multiplier));
     this.overlay.judgement(GRADE_LABEL[grade], grade, note.sx, note.sy - note.sr - 14);
-    this.sfx.noteHit(this.comboTone(tapBeat), grade === 'perfect');
+    this.sfx.noteHit(this.toneFor(note.order, note.beat), grade === 'perfect');
     navigator.vibrate?.(grade === 'perfect' ? 12 : 6);
-
-    if (note.kind === 'strike') {
-      this.launchRocket(note.fighter, tapBeat);
-    } else if (note.orb) {
-      const p = note.orb.mesh.position;
-      this.effects.explode(p.x, p.y, ORB_COLORS, 12, 5, 0.4, p.z);
-      this.effects.ring(p.x, p.y, p.z, 0xff4f8b, 1.6, 0.3, true);
-      this.sfx.orbPop();
-      this.removeOrb(note.orb);
-    }
+    this.launchRocket(note.fighter, tapBeat);
   }
 
   private missNote(note: Note, label: string): void {
-    this.removeNote(note);
+    note.judged = true;
+    note.missed = true;
     if (this.combo >= 4) this.sfx.miss();
     this.combo = 0;
     this.overlay.judgement(label, 'miss', note.sx, note.sy - note.sr - 14);
-    if (note.kind === 'orb') {
-      if (note.orb) note.orb.missed = true;
-      return;
-    }
-    const f = note.fighter;
-    f.allocated--;
-    if (!f.alive || this.fleeing) return;
-    // The target dodges and shoots back (one incoming orb at a time, so misses don't snowball).
-    f.jink = JINK_TIME;
-    f.jinkDir = Math.random() < 0.5 ? -1 : 1;
-    const orbPending = this.notes.some((n) => n.kind === 'orb') || this.orbs.some((o) => o.missed);
-    if (!orbPending) this.addOrbNote(f, this.freeSlot(this.beat + COCKPIT.orbBeats));
   }
 
-  private removeNote(note: Note): void {
-    const index = this.notes.indexOf(note);
-    if (index >= 0) this.notes.splice(index, 1);
-  }
-
-  private removeNotes(match: (n: Note) => boolean): void {
-    for (let i = this.notes.length - 1; i >= 0; i--) {
-      const n = this.notes[i]!;
-      if (!match(n)) continue;
-      if (n.kind === 'strike') n.fighter.allocated--;
-      this.notes.splice(i, 1);
-    }
-  }
-
-  /** Chord tone for a hit; climbs the current chord's arpeggio as the combo grows. */
-  private comboTone(beat: number): number {
+  /** Tone for the n-th enemy of a phrase: climbs the chord under `beat`, so calls and replies sing. */
+  private toneFor(order: number, beat: number): number {
     const chord = this.music.chordAt(beat) ?? [62, 65, 69];
-    const tones = [...chord, ...chord.map((n) => n + 12)];
-    return tones[(this.combo - 1) % tones.length]! + 12;
+    const tones = [...chord, ...chord.map((n) => n + 12), chord[0]! + 24];
+    return tones[order % tones.length]! + 12;
   }
 
-  // --- Fighters and orbs -------------------------------------------------------------
+  // --- Fighters and return fire --------------------------------------------------------
 
-  private spawnFighter(kind: EnemyKind, start: Vector3, hover: Vector3, delay: number, round: number): void {
+  private spawnFighter(kind: EnemyKind, hover: Vector3, arriveBeat: number): Fighter {
     const model = ENEMY_STATS[kind].create();
     model.object.scale.setScalar(FIGHTER_SCALE);
     model.object.rotation.x = FIGHTER_PITCH;
+    // Straight down the line of sight, so the warp exit reads as coming from the vanishing point.
+    const start = hover.clone().add(tmp.set(0, WARP_IN_DISTANCE, 0));
     model.object.position.copy(start);
     model.object.visible = false;
     this.scene.add(model.object);
-    this.fighters.push({
+    const fighter: Fighter = {
       kind,
       model,
       baseEmissive: model.flashMaterials.map((m) => m.emissive.getHex()),
       position: model.object.position,
       radius: ENEMY_STATS[kind].radius * FIGHTER_SCALE,
-      hp: FIGHTER_HP[kind],
-      allocated: 0,
+      hp: kind === 'tank' ? HEAVY_HP : 1,
+      inFlight: 0,
       alive: true,
       start,
       hover,
-      delay,
-      round,
-      age: 0,
+      warpStartBeat: arriveBeat - WARP_LEAD_BEATS,
+      arriveBeat,
+      visible: false,
+      warpedIn: false,
+      leaving: null,
       phase: Math.random() * Math.PI * 2,
       flash: 0,
       streak: null,
-      warpedIn: false,
-      jink: 0,
-      jinkDir: 1,
-    });
+    };
+    this.fighters.push(fighter);
+    return fighter;
   }
 
-  /** Warps in the next reinforcement round once the current one is mostly cleared (or stale). */
-  private updateRounds(): void {
-    if (this.fleeing || this.round >= this.roundSizes.length - 1) return;
-    const left = this.fighters.filter((f) => f.round === this.round).length;
-    const stale = this.activeTime - this.roundStart > COCKPIT.roundTime;
-    if (left > COCKPIT.nextRoundWhenLeft && !stale) return;
-
-    this.round++;
-    this.roundStart = this.activeTime;
-    let i = 0;
-    for (const f of this.fighters) {
-      if (f.round === this.round) f.delay = this.activeTime + 0.5 + i++ * 0.16;
-    }
-    this.overlay.showCallout(this.round === this.roundSizes.length - 1 ? 'FINAL WAVE!' : 'REINFORCEMENTS!', 1.2);
-    this.sfx.alarm();
+  private leave(f: Fighter): void {
+    if (f.leaving === null) f.leaving = 0;
   }
 
   private updateFighters(dt: number): void {
+    const beatSec = this.beatMs / 1000;
     for (let i = this.fighters.length - 1; i >= 0; i--) {
       const f = this.fighters[i]!;
-      // Nobody shows up until the HUD has finished booting (the section is "active").
-      if (this.activeTime < f.delay) continue;
-      if (f.age === 0) this.beginWarpIn(f);
-      f.age += dt;
+      if (this.beat < f.warpStartBeat && f.leaving === null) continue;
+      if (!f.visible) this.beginWarpIn(f);
+      const age = (this.beat - f.warpStartBeat) * beatSec;
 
-      if (this.fleeing) {
-        f.position.y += (20 + f.age) * dt;
-        f.position.z += 8 * dt;
-        if (f.position.y > this.anchor.y + 90) {
-          f.alive = false;
-          this.removeFighterModel(f);
-          this.fighters.splice(i, 1);
+      if (f.leaving !== null) {
+        // Warp back out: accelerate away down the line of sight.
+        f.leaving += dt;
+        f.position.y += (6 + 260 * f.leaving * f.leaving) * dt;
+        f.model.object.scale.set(FIGHTER_SCALE, FIGHTER_SCALE * (1 + f.leaving * 8), FIGHTER_SCALE);
+        if (f.leaving > 0.9 || !f.alive) {
+          this.removeFighter(f);
           continue;
         }
       } else {
-        const arrive = Math.min(1, f.age / WARP_IN_TIME);
+        const arrive = MathUtils.clamp((this.beat - f.warpStartBeat) / WARP_BEATS, 0, 1);
         // Very steep ease-out: huge speed at first, then an abrupt stop — a "drop out of warp".
         const eased = 1 - (1 - arrive) ** 5;
-        const settle = MathUtils.smoothstep(f.age, WARP_IN_TIME, WARP_IN_TIME + 1);
-        const t = f.age * (f.kind === 'weaver' ? 1.2 : 0.7) + f.phase;
-        // Gentle drift: targets must stay easy to tap on the beat.
-        tmp.set(Math.sin(t) * 1.1, Math.sin(t * 0.7) * 0.8, Math.cos(t) * 0.7);
-        if (f.jink > 0) {
-          f.jink = Math.max(0, f.jink - dt);
-          tmp.x += f.jinkDir * Math.sin((1 - f.jink / JINK_TIME) * Math.PI) * 2.4;
-        }
+        const settle = MathUtils.smoothstep(arrive, 0.9, 1);
+        const t = age * 0.6 + f.phase;
+        // Only a gentle drift, so targets stay put and easy to tap.
+        tmp.set(Math.sin(t) * 0.5, Math.sin(t * 0.7) * 0.4, Math.cos(t) * 0.35);
         f.position.lerpVectors(f.start, f.hover, eased).addScaledVector(tmp, settle);
         this.updateWarpIn(f, arrive);
       }
 
       const obj = f.model.object;
-      const jinkBank = f.jink > 0 ? -f.jinkDir * Math.sin((1 - f.jink / JINK_TIME) * Math.PI) * 0.9 : 0;
-      obj.rotation.y = Math.sin(f.age * (f.kind === 'weaver' ? 2.4 : 1.6) + f.phase) * 0.35 + jinkBank;
-
+      obj.rotation.y = Math.sin(age * 1.4 + f.phase) * 0.25;
       if (f.flash > 0) {
         f.flash -= dt;
         const on = f.flash > 0;
@@ -663,6 +647,7 @@ export class CockpitSection {
   }
 
   private beginWarpIn(f: Fighter): void {
+    f.visible = true;
     f.model.object.visible = true;
     f.streak = new Mesh(sharedGeometries.warpStreak, this.streakMaterial);
     this.scene.add(f.streak);
@@ -674,12 +659,11 @@ export class CockpitSection {
     // Stretch along the ship's nose axis, which points (mostly) down the line of sight.
     f.model.object.scale.set(FIGHTER_SCALE, FIGHTER_SCALE * (1 + speed * 10), FIGHTER_SCALE);
 
-    if (!f.warpedIn && arrive > 0.55) {
+    if (!f.warpedIn && this.beat >= f.arriveBeat) {
       f.warpedIn = true;
       const p = f.position;
-      this.effects.explode(p.x, p.y, WARP_FLASH_COLORS, 16, 7, 0.4, p.z);
-      this.effects.ring(p.x, p.y, p.z, 0x9fe8ff, 2.6, 0.4, true);
-      this.sfx.warpIn();
+      this.effects.explode(p.x, p.y, WARP_FLASH_COLORS, 18, 7, 0.4, p.z);
+      this.effects.ring(p.x, p.y, p.z, 0x9fe8ff, f.kind === 'tank' ? 6 : 3.2, 0.4, true);
     }
 
     if (!f.streak) return;
@@ -694,77 +678,40 @@ export class CockpitSection {
     f.streak.scale.set(width, length, width);
   }
 
-  private launchOrb(note: Note): Orb {
+  private fireVolley(shooters: Fighter[], fireBeat: number): void {
     this.sfx.orbFire();
-    const mesh = new Mesh(glowGeometry, this.orbMaterial);
-    mesh.position.copy(note.fighter.position);
-    this.scene.add(mesh);
-    // Spread judge points across the view so orbs don't all end up dead center.
-    const tanHalfFov = Math.tan(MathUtils.degToRad(COCKPIT.fov / 2));
-    const ahead = 6;
-    const spreadX = Math.min(2.2, ahead * tanHalfFov * (this.widthPx / this.heightPx) * 0.6);
-    const judge = new Vector3(
-      this.eye.x + MathUtils.randFloatSpread(2 * spreadX),
-      this.eye.y + ahead,
-      this.eye.z + MathUtils.randFloatSpread(ahead * tanHalfFov * 0.8) + 0.3,
-    );
-    const orb: Orb = {
-      mesh,
-      from: note.fighter.position.clone(),
-      judge,
-      fireBeat: note.fireBeat,
-      beat: note.beat,
-      missed: false,
-    };
-    this.orbs.push(orb);
-    return orb;
+    const bolts = shooters.map((f) => {
+      const mesh = new Mesh(glowGeometry, this.boltMaterial);
+      mesh.position.copy(f.position);
+      this.scene.add(mesh);
+      return { mesh, from: f.position.clone() };
+    });
+    this.volleys.push({ bolts, fireBeat, hitBeat: fireBeat + VOLLEY_BEATS });
   }
 
-  /** Moves orbs along their beat-timed paths; returns true if one reached the cockpit. */
-  private updateOrbs(): boolean {
-    let hit = false;
-    const pulse = (1 - (this.beat - Math.floor(this.beat))) ** 2;
-    for (let i = this.orbs.length - 1; i >= 0; i--) {
-      const orb = this.orbs[i]!;
-      const pos = orb.mesh.position;
-      if (orb.missed) {
-        const t = (this.beat - orb.beat) / ORB_HIT_BEATS;
-        pos.lerpVectors(orb.judge, this.eye, Math.min(1, Math.max(0, t)));
-        if (t >= 1) {
-          hit = true;
-          this.removeOrb(orb);
-          continue;
-        }
-      } else {
-        const span = Math.max(0.01, orb.beat - orb.fireBeat);
-        const t = MathUtils.clamp((this.beat - orb.fireBeat) / span, 0, 1);
-        pos.lerpVectors(orb.from, orb.judge, t ** 1.4);
+  /** Moves return fire; a volley reaching the cockpit costs a shield pip (or a life). */
+  private updateVolleys(): void {
+    for (let i = this.volleys.length - 1; i >= 0; i--) {
+      const v = this.volleys[i]!;
+      const t = MathUtils.clamp((this.beat - v.fireBeat) / (v.hitBeat - v.fireBeat), 0, 1);
+      for (const b of v.bolts) {
+        b.mesh.position.lerpVectors(b.from, tmp.copy(this.eye).add(tmp2.set(0, 1.2, -0.2)), t * t);
+        b.mesh.scale.setScalar(1 + t * 0.6);
       }
-      orb.mesh.scale.setScalar(1 + pulse * 0.35);
+      if (t < 1) continue;
+      for (const b of v.bolts) this.scene.remove(b.mesh);
+      this.volleys.splice(i, 1);
+      if (this.shield > 0) {
+        this.shield--;
+        this.sfx.shieldHit();
+        this.overlay.hitFlash();
+        this.overlay.showCallout(this.shield > 0 ? 'SHIELD HIT' : 'SHIELD DOWN!', 0.9);
+        this.callbacks.blast(this.eye, 0.3);
+      } else {
+        this.callbacks.playerHit();
+        if (!this.running) return;
+      }
     }
-    return hit;
-  }
-
-  private removeOrb(orb: Orb): void {
-    this.scene.remove(orb.mesh);
-    const index = this.orbs.indexOf(orb);
-    if (index >= 0) this.orbs.splice(index, 1);
-  }
-
-  private flee(): void {
-    this.fleeing = true;
-    // Reinforcements that never arrived simply don't come.
-    for (let i = this.fighters.length - 1; i >= 0; i--) {
-      const f = this.fighters[i]!;
-      if (f.age > 0) continue;
-      f.alive = false;
-      this.removeFighterModel(f);
-      this.fighters.splice(i, 1);
-    }
-    this.removeNotes(() => true);
-    for (const orb of [...this.orbs]) if (!orb.missed) this.removeOrb(orb);
-    this.overlay.showCallout('THEY GOT AWAY', 1.5);
-    this.sfx.escaped();
   }
 
   // --- Rockets -------------------------------------------------------------------------
@@ -784,8 +731,8 @@ export class CockpitSection {
     this.sfx.rocket();
 
     // Rockets always connect, so the impact sound can be put on the beat right away.
-    const earlier = this.rockets.filter((r) => r.target === target).length;
-    const lethal = target.hp - earlier <= 1;
+    const lethal = target.hp - target.inFlight <= 1;
+    target.inFlight++;
     const time = this.music.timeOfBeat(impactBeat);
     if (time !== null) this.impactSound(target, lethal, time);
     this.rockets.push({ mesh, target, from, ctrl, launchBeat, impactBeat, gold, soundOnImpact: time === null, lethal });
@@ -819,16 +766,16 @@ export class CockpitSection {
   }
 
   private damage(f: Fighter, gold: boolean): void {
-    f.allocated = Math.max(0, f.allocated - 1);
+    f.inFlight = Math.max(0, f.inFlight - 1);
     if (!f.alive) return;
     f.hp--;
     const p = f.position;
     if (gold) this.effects.explode(p.x, p.y, GOLD_COLORS, 14, 8, 0.4, p.z);
 
     if (f.hp > 0) {
-      f.flash = 0.08;
-      this.effects.explode(p.x, p.y, [0xffffff, 0xffa040], 10, 5, 0.3, p.z);
-      this.effects.ring(p.x, p.y, p.z, 0xffa040, 2.2, 0.25, true);
+      f.flash = 0.1;
+      this.effects.explode(p.x, p.y, [0xffffff, 0xffa040], 14, 6, 0.35, p.z);
+      this.effects.ring(p.x, p.y, p.z, 0xffa040, 4, 0.3, true);
       return;
     }
 
@@ -839,13 +786,14 @@ export class CockpitSection {
     this.effects.ring(p.x, p.y, p.z, gold ? 0xffd23d : big ? 0xffb443 : 0xff5a36, big ? 9 : 4.5, big ? 0.6 : 0.4, true);
     if (big || gold) this.callbacks.blast(p, big ? 1 : 0.35);
     navigator.vibrate?.(big ? 40 : 15);
-    // Orbs it hadn't fired yet are cancelled with it.
-    this.removeNotes((n) => n.kind === 'orb' && n.fighter === f && !n.orb);
-    this.removeFighterModel(f);
-    this.fighters.splice(this.fighters.indexOf(f), 1);
+    this.removeFighter(f);
   }
 
   // --- Presentation ----------------------------------------------------------------------
+
+  private projectFighter(f: Fighter): { x: number; y: number; r: number } | null {
+    return this.lastFrame ? this.project(f.position, f.radius, this.lastFrame) : null;
+  }
 
   private project(position: Vector3, radius: number, frame: CockpitFrame): { x: number; y: number; r: number } | null {
     const cam = frame.camera;
@@ -861,38 +809,73 @@ export class CockpitSection {
   }
 
   private updateOverlay(frame: CockpitFrame): void {
+    this.lastFrame = frame;
     this.markers.length = 0;
     this.lane.length = 0;
-    for (const n of this.notes) {
-      const style: NoteStyle = n.kind === 'orb' ? 'orb' : n.fighter.kind === 'tank' ? 'heavy' : 'strike';
-      const until = n.beat - this.beat;
-      this.lane.push({ beats: until, style });
-      const target = n.kind === 'strike' ? n.fighter.position : n.orb?.mesh.position;
-      const screen = target ? this.project(target, n.kind === 'orb' ? ORB_RADIUS * 2 : n.fighter.radius, frame) : null;
-      n.onScreen = screen !== null;
-      if (!screen) continue;
-      n.sx = screen.x;
-      n.sy = screen.y;
-      n.sr = screen.r;
-      if (until > COCKPIT.approachBeats) continue;
-      this.markers.push({
-        x: screen.x,
-        y: screen.y,
-        size: MathUtils.clamp(screen.r * 1.1, 24, 0.09 * Math.min(frame.widthPx, frame.heightPx) + 12),
-        approach: until / COCKPIT.approachBeats,
-        style,
-      });
+    let next: Note | null = null;
+    for (const n of this.pendingNotes()) if (!next || n.beat < next.beat) next = n;
+
+    for (const p of this.phrases) {
+      for (const n of p.notes) {
+        const style = n.fighter.kind === 'tank' ? 'heavy' : 'strike';
+        if (!n.called) this.lane.push({ beats: n.callBeat - this.beat, style: 'call' });
+        if (n.judged) continue;
+        this.lane.push({ beats: n.beat - this.beat, style });
+        const screen = n.fighter.warpedIn ? this.project(n.fighter.position, n.fighter.radius, frame) : null;
+        n.onScreen = screen !== null;
+        if (!screen) continue;
+        n.sx = screen.x;
+        n.sy = screen.y;
+        n.sr = screen.r;
+        // Targets get their numbered circle once their call is done and the reply is near.
+        const until = n.beat - this.beat;
+        if (!n.called || this.beat < p.start + 3.5) continue;
+        const isNext = n === next;
+        this.markers.push({
+          x: screen.x,
+          y: screen.y,
+          size: MathUtils.clamp(screen.r * 1.1, 24, 0.09 * Math.min(frame.widthPx, frame.heightPx) + 12),
+          approach: isNext && until <= COCKPIT.approachBeats ? until / COCKPIT.approachBeats : null,
+          style,
+          label: String(n.order + 1),
+          next: isNext,
+        });
+      }
     }
     this.overlay.setNotes(this.markers);
     this.overlay.setBeat(this.beat, this.lane);
     this.overlay.setCombo(this.combo, this.multiplier, this.overdrive);
-    this.overlay.setTimer(this.timeLeft / COCKPIT.timeLimit);
-    this.overlay.setHintVisible(frame.active && this.activeTime < 5 && this.wave <= 2);
+    this.overlay.setShield(this.shield, COCKPIT.shield);
+    this.overlay.setTimer(1 - this.phraseCount / Math.max(1, this.totalPhrases));
+
+    const current = this.phrases.find((p) => this.beat >= p.start && this.beat < p.start + 8);
+    const inPhrase = current ? this.beat - current.start : 0;
+    const mode: PhraseMode = !current ? null : inPhrase < 4 ? 'watch' : 'repeat';
+    this.overlay.setPhase(mode, Math.floor(inPhrase % 4));
+    this.overlay.setHintVisible(frame.active && this.phraseCount <= 2 && this.strike <= 1);
+  }
+
+  private removeFighter(f: Fighter): void {
+    f.alive = false;
+    this.removeFighterModel(f);
+    const index = this.fighters.indexOf(f);
+    if (index >= 0) this.fighters.splice(index, 1);
   }
 
   private removeFighterModel(f: Fighter): void {
     if (f.streak) this.scene.remove(f.streak);
     this.scene.remove(f.model.object);
     disposeModel(f.model);
+  }
+}
+
+function unique<T>(items: T[]): T[] {
+  return [...new Set(items)];
+}
+
+function shuffle<T>(items: T[]): void {
+  for (let i = items.length - 1; i > 0; i--) {
+    const j = MathUtils.randInt(0, i);
+    [items[i], items[j]] = [items[j]!, items[i]!];
   }
 }

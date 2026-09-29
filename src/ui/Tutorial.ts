@@ -29,11 +29,10 @@ const CONTENT: Record<TutorialId, TutorialContent> = {
     title: 'COCKPIT STRIKE',
     art: 'tutorial-art-rhythm',
     lines: [
-      'Rings close onto targets <b>on the beat</b>. <b>Tap the target</b> the moment its ring lines up.',
-      'Each hit fires a rocket that lands on the music. Heavies (orange) need several hits.',
-      'The bar at the bottom shows the <b>upcoming beats</b>.',
-      '<b>Pink orbs</b> are incoming fire: tap them on their beat too, or take a hit.',
-      'Miss and the target dodges and shoots back. Chain hits for a <b>combo</b> and <b>Overdrive</b>!',
+      '<b>WATCH:</b> enemies drop out of warp one by one, on the beat. Remember the order and rhythm.',
+      '<b>REPEAT:</b> tap them back <b>in the same order and rhythm</b>. Numbers show the order; a ring closes on the next one.',
+      'Each hit fires a rocket that explodes on the music. Orange heavies come back until destroyed.',
+      'Enemies you miss <b>shoot back</b>: first your shield, then your lives. Chain hits for a <b>combo</b>!',
     ],
   },
 };

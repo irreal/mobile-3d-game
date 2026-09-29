@@ -102,18 +102,18 @@ export const COCKPIT = {
   exitDuration: 3.2,
   /** Seconds of HUD power-on animation before the fight starts. */
   bootDuration: 1.8,
-  /** Section ends (remaining enemies flee) after this many seconds. */
-  timeLimit: 45,
   /** A cockpit strike happens after every this many waves. */
   everyWaves: 2,
-  /** The squadron warps in over this many rounds of reinforcements. */
-  rounds: 3,
-  /** Next round warps in when at most this many of the current round remain... */
-  nextRoundWhenLeft: 1,
-  /** ...or after this many seconds, whichever comes first. */
-  roundTime: 13,
+  /**
+   * Call-and-response phrases per strike (base + per strike). Each phrase is two bars:
+   * enemies warp in on a rhythm (call), then the player taps them back in order (response).
+   */
+  phrases: 6,
+  phrasesPerStrike: 1,
+  /** Phrases with misses cost a shield pip (refilled each strike); with none left, a life. */
+  shield: 3,
   /** Beats an approach ring takes to close onto its target. */
-  approachBeats: 2,
+  approachBeats: 1,
   /** Timing windows (ms either side of the beat) for each judgement. */
   perfectMs: 70,
   greatMs: 130,
@@ -124,13 +124,10 @@ export const COCKPIT = {
   inputOffsetMs: 0,
   /** Minimum touch radius in CSS pixels, as a fraction of the shorter screen side. */
   hitRadius: 0.13,
-  /** Beats an orb takes from launch to the moment it must be shot down. */
-  orbBeats: 2,
   /** Combo needed for Overdrive (gold rockets, double points). */
   overdriveCombo: 16,
   /** Combo steps that each add +0.5 to the score multiplier (before Overdrive). */
   comboStep: 8,
   clearBonusPerWave: 1000,
-  timeBonusPerSecond: 50,
   maxComboBonus: 25,
 };

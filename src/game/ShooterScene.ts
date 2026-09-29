@@ -446,20 +446,17 @@ export class ShooterScene implements GameScene {
     if (status === 'running' || this.state !== 'playing') return;
     this.cockpit.popOrbs();
     this.setPhase('sectionEnd');
-    if (status === 'cleared') {
-      const wave = this.spawner.wave;
-      const combo = this.cockpit.maxCombo;
-      const bonus =
-        COCKPIT.clearBonusPerWave * wave +
-        Math.round(this.cockpit.timeLeft) * COCKPIT.timeBonusPerSecond +
-        combo * COCKPIT.maxComboBonus;
-      this.score += bonus;
-      this.cockpitOverlay.showCallout(
-        `SQUADRON DESTROYED\nMAX COMBO ${combo}\n+${bonus.toLocaleString('en-US')}`,
-        SECTION_END_PAUSE,
-      );
-      this.audio.sfx.squadronCleared();
-    }
+    const accuracy = this.cockpit.accuracy;
+    const combo = this.cockpit.maxCombo;
+    const bonus =
+      Math.round(COCKPIT.clearBonusPerWave * this.spawner.wave * accuracy) + combo * COCKPIT.maxComboBonus;
+    this.score += bonus;
+    const title = accuracy >= 1 ? 'FLAWLESS STRIKE!' : 'STRIKE COMPLETE';
+    this.cockpitOverlay.showCallout(
+      `${title}\nACCURACY ${Math.round(accuracy * 100)}% · MAX COMBO ${combo}\n+${bonus.toLocaleString('en-US')}`,
+      SECTION_END_PAUSE,
+    );
+    this.audio.sfx.squadronCleared();
   }
 
   private startNextWave(): void {

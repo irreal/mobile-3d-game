@@ -284,9 +284,24 @@ body {
   --note: #ffb443;
 }
 
-.cockpit-note.orb {
-  --note: #ff4f8b;
-  border-style: dashed;
+.cockpit-note:not(.next) {
+  opacity: 0.45;
+}
+
+.cockpit-note.next {
+  border-width: 3px;
+}
+
+.cockpit-note-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 0 6px var(--note);
 }
 
 .cockpit-note.now {
@@ -334,6 +349,12 @@ body {
 
 .cockpit-judge.good {
   color: #9fe8ff;
+}
+
+.cockpit-judge.call {
+  font-size: 24px;
+  color: #fff;
+  text-shadow: 0 0 12px #6ff3ff;
 }
 
 .cockpit-judge.miss {
@@ -417,11 +438,93 @@ body {
   box-shadow: 0 0 8px #ffb443;
 }
 
-.cockpit-lane-note.orb {
-  background: #ff4f8b;
-  box-shadow: 0 0 8px #ff4f8b;
-  border-radius: 3px;
-  transform-origin: center;
+.cockpit-lane-note.call {
+  background: transparent;
+  border: 2px solid rgb(255 255 255 / 70%);
+  box-shadow: none;
+}
+
+.cockpit-phase {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(env(safe-area-inset-top) + 76px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  opacity: 0;
+  transition: opacity 200ms;
+}
+
+.cockpit-phase.watch,
+.cockpit-phase.repeat {
+  opacity: 1;
+}
+
+.cockpit-phase-label {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.3em;
+}
+
+.cockpit-phase.repeat .cockpit-phase-label {
+  color: #ffe98a;
+  text-shadow: 0 0 10px rgb(255 210 61 / 80%);
+}
+
+.cockpit-phase-pips {
+  display: flex;
+  gap: 8px;
+}
+
+.cockpit-phase-pip {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid rgb(159 232 255 / 60%);
+}
+
+.cockpit-phase-pip.on {
+  background: #9fe8ff;
+  box-shadow: 0 0 6px #6ff3ff;
+}
+
+.cockpit-phase.repeat .cockpit-phase-pip {
+  border-color: rgb(255 210 61 / 70%);
+}
+
+.cockpit-phase.repeat .cockpit-phase-pip.on {
+  background: #ffd23d;
+  box-shadow: 0 0 6px #ffd23d;
+}
+
+.cockpit-shield {
+  position: absolute;
+  left: calc(env(safe-area-inset-left) + 14px);
+  bottom: calc(env(safe-area-inset-bottom) + 68px);
+  display: flex;
+  gap: 4px;
+}
+
+.cockpit-shield::before {
+  content: 'SHIELD';
+  margin-right: 4px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  line-height: 10px;
+}
+
+.cockpit-shield-pip {
+  width: 14px;
+  height: 8px;
+  border-radius: 2px;
+  border: 1px solid rgb(159 232 255 / 50%);
+}
+
+.cockpit-shield-pip.on {
+  background: #6ff3ff;
+  box-shadow: 0 0 6px #6ff3ff;
 }
 
 .cockpit-combo {
@@ -674,6 +777,7 @@ body {
 
 .cockpit.booting .cockpit-timer,
 .cockpit.booting .cockpit-lane,
+.cockpit.booting .cockpit-shield,
 .cockpit.booting .cockpit-combo {
   animation: boot-fade 0.3s 1.2s both;
 }

@@ -68,30 +68,33 @@ Each wave is a fixed number of formations, and enemy HP grows each wave. After e
 roll) into the cockpit. The HUD powers on (flicker, scan line, boot text), then the enemy
 squadron drops out of warp right in front of you and you fight it in first person:
 
-The fight is a **rhythm game locked to the cockpit music** (146 BPM):
+The fight is a **call-and-response rhythm game locked to the cockpit music** (146 BPM), in
+phrases of two bars:
 
-- Targets get notes on an 8th-note grid. An **approach ring** closes onto each target over two
-  beats; **tap the target the moment the ring lines up**. The bar at the bottom scrolls the
-  upcoming notes toward a hit line, and the crosshair pulses on every beat.
+- **WATCH (call bar):** enemies drop out of warp one at a time on an 8th-note rhythm. Each warp
+  flash lands on the beat with its own tone (climbing the current chord), and a number pops up to
+  show its place in the sequence.
+- **REPEAT (response bar):** tap the enemies back **in the same order and rhythm**, one bar later.
+  Each target shows its number, the next one is highlighted and a ring closes on it over the last
+  beat. The bar at the bottom shows the call (hollow) and the reply (solid) scrolling toward the
+  hit line; the indicator at the top shows WATCH/REPEAT and the beat within the bar.
 - Timing is judged against what you *hear* (the audio clock, corrected for output latency) using
   the touch event's own timestamp: **PERFECT** within ±70 ms, **GREAT** ±130 ms, **GOOD** ±200 ms.
   Tapping a target far too early is a MISS, so spamming doesn't work.
-- Every hit fires a rocket that lands on the next 8th note after a short flight. Impact sounds are
-  scheduled on the music clock, so explosions hit on the beat. Hits play chord tones of the current
-  bar and climb the arpeggio as your combo grows.
-- Grunts take 1 hit, weavers 2, heavies 4 (fast runs of notes on the same target). Rhythms get
-  denser with each strike and again in the final round.
-- **Pink orbs** are incoming fire: they are notes too, flying in to arrive on their beat. Tap them
-  in time or they hit the cockpit.
-- **Miss a note** and the target dodges and shoots an orb back at you, and your combo resets.
+- Every hit fires a rocket that lands on the next 8th note after a short flight; impact sounds are
+  scheduled on the music clock, so explosions hit on the beat. Replies play the same tones as the
+  calls, so the response "answers" the call melody.
+- Enemies you missed **fire back** at the end of the phrase (a volley that lands 1½ beats later)
+  and warp away. Each volley costs one of 3 shield pips (refilled every strike); with the shield
+  down it costs a life.
+- **Heavies** (orange, from the second strike) stay on the field and join one call per phrase
+  until they've been hit twice.
+- Rhythms get denser with each strike and again halfway through; from level 3 the sequence jumps
+  around the screen instead of reading left to right. A strike is 6 phrases, +1 per strike.
 - **Combo:** ×1.5 score from 8 hits in a row; at 16 you enter **Overdrive** (gold rockets, ×2).
-  The section-clear bonus includes your max combo.
-- The music keeps playing while paused; on resume the chart moves back by whole bars so it
+  The strike bonus scales with accuracy and adds your max combo.
+- The music keeps playing while paused; on resume the chart moves back by whole phrases so it
   stays on the beat. `COCKPIT.inputOffsetMs` in `constants.ts` can compensate for touch latency.
-- The squadron attacks in 3 rounds. When a round is almost cleared (or after a while), the next
-  round of **reinforcements** warps in, and the last round brings the heavies.
-- Clear all rounds before the 45-second timer runs out for a bonus (more for time left). If time
-  runs out, they escape.
 - The first-person view is an actual cockpit interior (dashboard, canopy glass and struts) that
   the camera flies into; its dashboard lights power on with the HUD.
 - The camera then flies back out and the next, harder wave starts. Squadrons grow and gain heavies
@@ -179,7 +182,7 @@ src/
     models.ts              GLB ship loading (with procedural fallbacks), power-up models
     CockpitInterior.ts     3D cockpit interior for the first-person view
     CameraDirector.ts      Camera pose: top-down ↔ cockpit fly-in/out transition, shake
-    CockpitSection.ts      First-person strike: beat-synced chart, notes, orbs, rockets, combo
+    CockpitSection.ts      First-person strike: call-and-response phrases, rockets, return fire, combo
     WarpField.ts           Speed-line streaks shown in first person
   audio/
     AudioEngine.ts         Web Audio graph (music/sfx buses, echo, filter), synth voices, unlock
