@@ -1,6 +1,7 @@
 # mobile-3d-game
 
-Three.js 3D game for mobile browsers, built with Vite + TypeScript.
+**Nova Strike**: a vertical shoot 'em up for mobile browsers, built with Three.js, Vite and TypeScript.
+Fly upward through space, shoot incoming aliens and dodge their fire.
 
 **Live:** https://irreal.github.io/mobile-3d-game/
 
@@ -37,8 +38,22 @@ production build instead, run `npm run build && npm run preview:host` (port 4173
 Some browser APIs (fullscreen, device orientation, vibration, etc.) require HTTPS on phones and
 won't work over plain-HTTP LAN; use the deployed GitHub Pages site to test those.
 
-Controls: drag anywhere on the screen to move (floating virtual joystick), tap **JUMP** to jump.
-On desktop: WASD / arrow keys and Space, or drag with the mouse.
+## How to play
+
+- **Touch:** drag anywhere to steer. The ship follows your finger's movement rather than jumping to
+  where you touch, so keep your thumb below the ship where it doesn't block the view.
+- **Desktop:** WASD / arrow keys, or drag with the mouse. Space / Enter / click starts a game.
+- Your ship fires automatically. You have 3 lives. After a hit you blink (invulnerable) briefly,
+  enemy bullets on screen are cleared, and you lose one weapon level.
+- Your hitbox is only the small core of the ship; bullets grazing the wings don't count.
+- Green gems power up your weapon (3 levels). Big purple aliens always drop one; others sometimes do.
+- Enemies:
+  - **Saucer** (green): drifts down, fires aimed shots.
+  - **Dart** (orange): comes in snaking lines, fires straight down.
+  - **Heavy** (purple): parks near the top, fires 5-way spreads, takes many hits.
+- Difficulty (spawn rate, bullet speed, fire rate, formations) ramps up over about 2.5 minutes.
+- The high score is stored in `localStorage`. Add `?fps` to the URL to show an FPS meter
+  (always on in dev).
 
 ## Project structure
 
@@ -46,33 +61,41 @@ On desktop: WASD / arrow keys and Space, or drag with the mouse.
 index.html                 Mobile viewport meta, #app mount point
 public/                    Static files copied as-is (favicon, web app manifest)
 src/
-  main.ts                  Bootstraps engine, input, HUD and the initial scene
-  config.ts                Tunables: pixel-ratio cap, camera FOVs, joystick, shadows
-  style.css                Full-screen canvas, gesture blocking, touch UI styles
+  main.ts                  Bootstraps engine, input, HUD and the game scene
+  config.ts                Engine tunables: pixel-ratio cap, camera, antialias
+  style.css                Full-screen canvas, gesture blocking, HUD styles
   core/
     Engine.ts              WebGLRenderer + camera, resize handling, active GameScene
     GameLoop.ts            setAnimationLoop wrapper, clamped delta, pauses when hidden
     viewport.ts            Resize/orientation observers, default touch gesture blocking
   input/
-    Input.ts               Unified input (move vector + jump) from touch and keyboard
-    VirtualJoystick.ts     Floating on-screen joystick (pointer events, multi-touch safe)
-    ActionButton.ts        On-screen touch button
+    Input.ts               Relative drag steering, keyboard axis, tap events
     Keyboard.ts            Held-key tracking for desktop
   game/
-    PlaygroundScene.ts     Placeholder level: lights, ground, crates, follow camera
-    Player.ts              Controllable character: movement, jump, box collisions
+    ShooterScene.ts        Game states (title/playing/game over), weapons, collisions, scoring
+    constants.ts           Gameplay tuning: playfield size, player, bullets, power-ups
+    Playfield.ts           Fits the camera so the arena works on any aspect ratio
+    PlayerShip.ts          Player ship visuals: banking, engine flicker, blink
+    Enemy.ts               Enemy types, stats, movement and firing patterns
+    WaveSpawner.ts         Formations and difficulty ramp over time
+    InstancedPool.ts       Instanced-mesh pool for bullets/particles (1 draw call each)
+    Effects.ts             Explosion particles
+    Starfield.ts           Parallax scrolling stars
+    models.ts              Procedural placeholder models (ship, aliens, power-up)
   ui/
-    Hud.ts                 FPS counter and controls hint
+    Hud.ts                 Score, high score, lives, weapon level, messages, FPS meter
 ```
 
-To add a level, implement the `GameScene` interface from `src/core/Engine.ts` (a `scene` plus an
-`update(dt)` method) and pass it to `engine.setScene(...)`.
+Gameplay happens on the z = 0 plane with +y as "up the screen"; the camera looks straight down
+the -z axis. Most balance changes go in `src/game/constants.ts`, `ENEMY_STATS` in `Enemy.ts`, and
+the formation rules in `WaveSpawner.ts`.
 
 ### Mobile notes
 
 - `devicePixelRatio` is capped at 2 (`config.maxPixelRatio`) to keep fill rate manageable.
 - The canvas buffer is resized on element resize, window resize, orientation change and mobile
-  browser toolbar changes (`visualViewport`); the camera widens its FOV in portrait.
+  browser toolbar changes (`visualViewport`). The camera pulls back on narrow portrait screens so
+  the arena is always at least `PLAYFIELD.minWidth` wide.
 - Pinch-zoom, double-tap zoom, pull-to-refresh, scroll bounce, text selection and long-press menus
   are disabled via the viewport meta, CSS `touch-action`/`overscroll-behavior`, and event listeners.
 

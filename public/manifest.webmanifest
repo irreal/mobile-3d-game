@@ -1,12 +1,12 @@
 {
-  "name": "Mobile 3D Game",
-  "short_name": "3D Game",
+  "name": "Nova Strike",
+  "short_name": "Nova Strike",
   "start_url": ".",
   "scope": ".",
   "display": "fullscreen",
   "orientation": "any",
-  "background_color": "#0b1020",
-  "theme_color": "#0b1020",
+  "background_color": "#05060f",
+  "theme_color": "#05060f",
   "icons": [
     {
       "src": "favicon.svg",

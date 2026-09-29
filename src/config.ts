@@ -4,17 +4,10 @@ export const config = {
   /** Largest simulation step in seconds, so a backgrounded tab doesn't teleport things on resume. */
   maxDeltaTime: 0.1,
   antialias: true,
-  shadows: true,
+  shadows: false,
   camera: {
-    fovLandscape: 55,
-    /** Portrait screens are narrow, so widen the vertical FOV to keep the horizontal view usable. */
-    fovPortrait: 70,
+    fov: 60,
     near: 0.1,
     far: 200,
-  },
-  joystick: {
-    /** Max knob travel in CSS pixels. */
-    radius: 50,
-    deadZone: 0.12,
   },
 } as const;
