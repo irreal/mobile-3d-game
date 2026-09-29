@@ -16,9 +16,12 @@ export interface Vec2 {
 export class Input {
   /** Keyboard movement axis, each component in [-1, 1]; +y is up. */
   readonly axis: Vec2 = { x: 0, y: 0 };
+  /** Position of the active pointer in CSS pixels relative to the surface (valid while `dragging`). */
+  readonly pointer: Vec2 = { x: 0, y: 0 };
 
   private readonly keyboard = new Keyboard();
   private readonly tapListeners = new Set<() => void>();
+  private readonly releaseListeners = new Set<() => void>();
   private pointerId: number | null = null;
   private lastX = 0;
   private lastY = 0;
@@ -42,6 +45,12 @@ export class Input {
   onTap(listener: () => void): () => void {
     this.tapListeners.add(listener);
     return () => this.tapListeners.delete(listener);
+  }
+
+  /** Fires when the steering pointer is lifted (or cancelled). */
+  onRelease(listener: () => void): () => void {
+    this.releaseListeners.add(listener);
+    return () => this.releaseListeners.delete(listener);
   }
 
   /** Call once per frame before reading `axis` / `consumeDrag`. */
@@ -90,6 +99,7 @@ export class Input {
     this.surface.setPointerCapture(e.pointerId);
     this.lastX = e.clientX;
     this.lastY = e.clientY;
+    this.updatePointer(e);
   };
 
   private readonly onMove = (e: PointerEvent): void => {
@@ -98,10 +108,18 @@ export class Input {
     this.dragY -= e.clientY - this.lastY;
     this.lastX = e.clientX;
     this.lastY = e.clientY;
+    this.updatePointer(e);
   };
 
   private readonly onUp = (e: PointerEvent): void => {
     if (e.pointerId !== this.pointerId) return;
     this.pointerId = null;
+    this.releaseListeners.forEach((fn) => fn());
   };
+
+  private updatePointer(e: PointerEvent): void {
+    const rect = this.surface.getBoundingClientRect();
+    this.pointer.x = e.clientX - rect.left;
+    this.pointer.y = e.clientY - rect.top;
+  }
 }

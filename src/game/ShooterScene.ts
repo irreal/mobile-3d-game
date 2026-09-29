@@ -11,8 +11,13 @@ import {
 import type { PerspectiveCamera } from 'three';
 import type { GameScene } from '../core/Engine.ts';
 import type { Input, Vec2 } from '../input/Input.ts';
+import type { CockpitOverlay } from '../ui/CockpitOverlay.ts';
 import type { Hud } from '../ui/Hud.ts';
+import { CameraDirector } from './CameraDirector.ts';
+import { CockpitSection } from './CockpitSection.ts';
+import type { SectionStatus } from './CockpitSection.ts';
 import {
+  COCKPIT,
   DIFFICULTY_RAMP_TIME,
   ENEMY_BULLET,
   GAME_TITLE,
@@ -29,9 +34,20 @@ import type { Model } from './models.ts';
 import { Playfield } from './Playfield.ts';
 import { PlayerShip } from './PlayerShip.ts';
 import { Starfield } from './Starfield.ts';
+import { WarpField } from './WarpField.ts';
 import { WaveSpawner } from './WaveSpawner.ts';
 
 type State = 'title' | 'playing' | 'gameover';
+
+/**
+ * Phases while playing:
+ * shmup → waveClear (wave done, brief breather) → toCockpit (camera flies in) → cockpit
+ * (first-person fight) → sectionEnd (results) → toShmup (camera flies out) → next wave.
+ */
+type Phase = 'shmup' | 'waveClear' | 'toCockpit' | 'cockpit' | 'sectionEnd' | 'toShmup';
+
+const WAVE_CLEAR_PAUSE = 1.8;
+const SECTION_END_PAUSE = 1.6;
 
 interface Powerup {
   model: Model;
@@ -94,7 +110,12 @@ export class ShooterScene implements GameScene {
   private readonly powerups: Powerup[] = [];
   private readonly drag: Vec2 = { x: 0, y: 0 };
   private readonly unsubscribeTap: () => void;
+  private readonly unsubscribeRelease: () => void;
   private readonly enemyContext: EnemyContext;
+  private readonly director = new CameraDirector();
+  private readonly cockpitFill = new DirectionalLight(0xcfe0ff, 0);
+  private readonly warp = new WarpField();
+  private readonly cockpit: CockpitSection;
 
   private state: State = 'title';
   private stateTime = 0;
@@ -107,23 +128,39 @@ export class ShooterScene implements GameScene {
   private invulnerable = 0;
   private shake = 0;
   private gameOverShown = false;
+  private phase: Phase = 'shmup';
+  private phaseTime = 0;
+  private messageTimer = 0;
 
   constructor(
     private readonly camera: PerspectiveCamera,
     private readonly input: Input,
     private readonly hud: Hud,
+    private readonly cockpitOverlay: CockpitOverlay,
   ) {
     this.scene.background = new Color(0x05060f);
     this.scene.add(new HemisphereLight(0xb8c8ff, 0x1a1030, 1.4));
     const key = new DirectionalLight(0xffffff, 2.2);
     key.position.set(4, 6, 10);
     this.scene.add(key);
+    // The key light comes from ahead of the ship, so fighters would be backlit in first person.
+    this.cockpitFill.position.set(0, -1, 0.6);
+    this.scene.add(this.cockpitFill);
     const engineGlow = new PointLight(0xff8a3d, 6, 6, 1.5);
     engineGlow.position.set(0, -1.4, 0.8);
     this.player.object.add(engineGlow);
 
     for (const layer of this.starfield.layers) this.scene.add(layer.points);
     this.scene.add(this.player.object, this.playerBullets.mesh, this.enemyBullets.mesh, this.effects.particles.mesh);
+    this.scene.add(this.warp.object);
+
+    this.cockpit = new CockpitSection(this.scene, this.effects, cockpitOverlay, {
+      addScore: (points) => {
+        this.score += points;
+      },
+      playerHit: () => this.damagePlayer(),
+    });
+    cockpitOverlay.setOpacity(0);
 
     this.enemyContext = {
       playerX: 0,
@@ -136,13 +173,16 @@ export class ShooterScene implements GameScene {
     };
 
     this.unsubscribeTap = input.onTap(this.handleTap);
+    this.unsubscribeRelease = input.onRelease(() => {
+      if (this.state === 'playing' && (this.phase === 'cockpit' || this.phase === 'toCockpit')) this.cockpit.fire();
+    });
     this.enterTitle();
   }
 
   resize(width: number, height: number): void {
-    this.playfield.fit(this.camera, width, height);
+    this.playfield.fit(width, height);
     if (this.state !== 'playing') this.placePlayerAtStart();
-    else this.clampPlayer();
+    else if (this.phase === 'shmup') this.clampPlayer();
   }
 
   update(dt: number): void {
@@ -151,10 +191,7 @@ export class ShooterScene implements GameScene {
 
     const playing = this.state === 'playing';
     if (playing) {
-      this.time += dt;
-      this.updatePlayer(dt);
-      const difficulty = Math.min(this.time / DIFFICULTY_RAMP_TIME, 1);
-      this.spawner.update(dt, this.time, difficulty, this.playfield.halfWidth, this.spawnEnemy);
+      this.updatePhase(dt);
     } else {
       this.input.consumeDrag(this.drag);
       if (this.state === 'gameover' && !this.gameOverShown && this.stateTime > GAMEOVER_INPUT_DELAY) {
@@ -166,21 +203,131 @@ export class ShooterScene implements GameScene {
     this.updateEnemies(dt);
     this.updateBullets(dt);
     this.updatePowerups(dt);
-    if (playing) this.checkCollisions();
+    if (playing && this.phase !== 'toCockpit' && this.phase !== 'cockpit') this.checkCollisions();
 
     this.invulnerable = Math.max(0, this.invulnerable - dt);
     this.player.sync(dt, this.invulnerable);
     this.effects.update(dt);
-    this.starfield.update(dt, playing ? 14 : 5);
+    const blend = this.director.blend;
+    this.cockpitFill.intensity = 2.6 * blend;
+    this.starfield.update(dt, playing ? MathUtils.lerp(14, 30, blend) : 5);
+    this.warp.update(dt, blend, this.player.x, this.player.y, 45);
     this.playerBullets.sync();
     this.enemyBullets.sync();
-    this.updateCamera(dt);
+    this.shake = Math.max(0, this.shake - dt * 1.5);
+    this.director.update(dt, this.camera, this.playfield.cameraDistance, this.player.x, this.player.y, this.shake);
+    this.cockpitOverlay.setOpacity(MathUtils.clamp((blend - 0.6) / 0.4, 0, 1));
+    this.cockpitOverlay.update(dt);
+    if (this.messageTimer > 0) {
+      this.messageTimer -= dt;
+      if (this.messageTimer <= 0) this.hud.hideMessage();
+    }
     this.updateHud();
+  }
+
+  private updatePhase(dt: number): void {
+    this.phaseTime += dt;
+    const difficulty = Math.min(this.time / DIFFICULTY_RAMP_TIME, 1);
+
+    switch (this.phase) {
+      case 'shmup':
+        this.time += dt;
+        this.updatePlayer(dt);
+        this.spawner.update(dt, this.time, difficulty, this.playfield.halfWidth, this.spawnEnemy);
+        if (this.spawner.done && this.enemies.length === 0) {
+          this.setPhase('waveClear');
+          this.popEnemyBullets();
+          this.flashMessage(`WAVE ${this.spawner.wave} CLEAR`, 'Enemy squadron ahead!\nSwitching to cockpit…', 2.2);
+        }
+        break;
+
+      case 'waveClear':
+        // Player can still steer to grab falling power-ups; no firing.
+        this.steerPlayer(dt);
+        if (this.phaseTime > WAVE_CLEAR_PAUSE) {
+          this.setPhase('toCockpit');
+          this.director.enterCockpit();
+          const pf = this.playfield;
+          this.cockpit.start(this.player.x, this.player.y, this.spawner.wave, difficulty, pf.widthPx / pf.heightPx);
+        }
+        break;
+
+      case 'toCockpit':
+      case 'cockpit':
+        this.input.consumeDrag(this.drag);
+        if (this.phase === 'toCockpit' && this.director.inCockpit) this.setPhase('cockpit');
+        this.endSectionIfDone(this.updateCockpit(dt));
+        break;
+
+      case 'sectionEnd':
+        this.input.consumeDrag(this.drag);
+        this.updateCockpit(dt);
+        if (this.phaseTime > SECTION_END_PAUSE) {
+          this.setPhase('toShmup');
+          this.director.exitCockpit();
+        }
+        break;
+
+      case 'toShmup':
+        this.input.consumeDrag(this.drag);
+        if (!this.director.transitioning) {
+          this.cockpit.clear();
+          this.startNextWave();
+        }
+        break;
+    }
+  }
+
+  private updateCockpit(dt: number): SectionStatus {
+    const input = this.input;
+    const pf = this.playfield;
+    return this.cockpit.update(dt, {
+      camera: this.camera,
+      eye: this.director.eye,
+      active: this.phase === 'cockpit',
+      pointerDown: input.dragging,
+      pointerX: input.pointer.x,
+      pointerY: input.pointer.y,
+      widthPx: pf.widthPx,
+      heightPx: pf.heightPx,
+    });
+  }
+
+  private endSectionIfDone(status: SectionStatus): void {
+    if (status === 'running' || this.state !== 'playing') return;
+    this.cockpit.popOrbs();
+    this.setPhase('sectionEnd');
+    if (status === 'cleared') {
+      const wave = this.spawner.wave;
+      const bonus = COCKPIT.clearBonusPerWave * wave + Math.round(this.cockpit.timeLeft) * COCKPIT.timeBonusPerSecond;
+      this.score += bonus;
+      this.cockpitOverlay.showCallout(`SQUADRON DESTROYED\n+${bonus.toLocaleString('en-US')}`, SECTION_END_PAUSE);
+    }
+  }
+
+  private startNextWave(): void {
+    this.setPhase('shmup');
+    this.spawner.startWave();
+    this.fireTimer = 0;
+    this.flashMessage(`WAVE ${this.spawner.wave}`, '', 1.4);
+  }
+
+  private setPhase(phase: Phase): void {
+    this.phase = phase;
+    this.phaseTime = 0;
+  }
+
+  private flashMessage(title: string, body: string, seconds: number): void {
+    this.hud.showMessage(title, body);
+    this.messageTimer = seconds;
   }
 
   dispose(): void {
     this.unsubscribeTap();
+    this.unsubscribeRelease();
     this.clearWorld();
+    this.cockpit.dispose();
+    this.warp.dispose();
     this.starfield.dispose();
     this.playerBullets.dispose();
     this.enemyBullets.dispose();
@@ -214,15 +361,22 @@ export class ShooterScene implements GameScene {
     this.fireTimer = 0;
     this.invulnerable = 1;
     this.spawner.reset();
+    this.director.reset();
+    this.cockpit.clear();
     this.placePlayerAtStart();
     this.input.consumeDrag(this.drag);
     this.hud.hideMessage();
+    this.messageTimer = 0;
+    this.startNextWave();
   }
 
   private gameOver(): void {
     this.state = 'gameover';
     this.stateTime = 0;
     this.player.object.visible = false;
+    this.messageTimer = 0;
+    this.cockpit.clear();
+    if (this.director.blend > 0) this.director.exitCockpit(1.2);
     if (this.score > this.hiScore) {
       this.hiScore = this.score;
       saveHiScore(this.hiScore);
@@ -264,12 +418,16 @@ export class ShooterScene implements GameScene {
     this.player.y = MathUtils.clamp(this.player.y, pf.bottom + 1.2, pf.top - 2.5);
   }
 
-  private updatePlayer(dt: number): void {
+  private steerPlayer(dt: number): void {
     const drag = this.input.consumeDrag(this.drag);
     const scale = this.playfield.worldPerPixel * PLAYER.dragSensitivity;
     this.player.x += drag.x * scale + this.input.axis.x * PLAYER.keyboardSpeed * dt;
     this.player.y += drag.y * scale + this.input.axis.y * PLAYER.keyboardSpeed * dt;
     this.clampPlayer();
+  }
+
+  private updatePlayer(dt: number): void {
+    this.steerPlayer(dt);
 
     // Auto-fire: mobile players need both thumbs free for steering.
     this.fireTimer -= dt;
@@ -299,16 +457,17 @@ export class ShooterScene implements GameScene {
     if (this.invulnerable > 0) return;
     const { x, y } = this.player;
     this.lives--;
-    this.effects.explode(x, y, PLAYER_COLORS, 40, 12, 0.9);
     this.shake = 0.6;
     navigator.vibrate?.(this.lives > 0 ? 80 : 250);
+    if (this.director.blend > 0) {
+      this.cockpitOverlay.hitFlash();
+    } else {
+      this.effects.explode(x, y, PLAYER_COLORS, 40, 12, 0.9);
+    }
 
     // Clearing enemy fire on hit gives the player a moment to recover.
-    for (let i = 0; i < this.enemyBullets.count; i++) {
-      const b = this.enemyBullets.items[i]!;
-      this.effects.explode(b.x, b.y, [0xff4f8b], 2, 3, 0.3);
-    }
-    this.enemyBullets.clear();
+    this.popEnemyBullets();
+    this.cockpit.popOrbs();
 
     if (this.lives <= 0) {
       this.gameOver();
@@ -319,6 +478,14 @@ export class ShooterScene implements GameScene {
   }
 
   // --- Enemies, bullets, power-ups -----------------------------------------------------
+
+  private popEnemyBullets(): void {
+    for (let i = 0; i < this.enemyBullets.count; i++) {
+      const b = this.enemyBullets.items[i]!;
+      this.effects.explode(b.x, b.y, [0xff4f8b], 2, 3, 0.3);
+    }
+    this.enemyBullets.clear();
+  }
 
   private readonly spawnEnemy = (kind: EnemyKind, x: number, yOffset: number, phase: number): void => {
     const difficulty = Math.min(this.time / DIFFICULTY_RAMP_TIME, 1);
@@ -452,17 +619,8 @@ export class ShooterScene implements GameScene {
 
   // --- Presentation ----------------------------------------------------------------------
 
-  private updateCamera(dt: number): void {
-    this.shake = Math.max(0, this.shake - dt * 1.5);
-    const s = this.shake * this.shake;
-    this.camera.position.set(
-      (Math.random() - 0.5) * s * 1.2,
-      (Math.random() - 0.5) * s * 1.2,
-      this.playfield.cameraDistance,
-    );
-  }
-
   private updateHud(): void {
+    this.hud.setWave(this.state === 'title' ? 0 : this.spawner.wave);
     this.hud.setScore(this.score);
     this.hud.setHiScore(Math.max(this.hiScore, this.score));
     this.hud.setLives(this.state === 'title' ? PLAYER.lives : this.lives);

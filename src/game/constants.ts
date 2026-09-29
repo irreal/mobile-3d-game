@@ -1,6 +1,8 @@
 export const GAME_TITLE = 'NOVA STRIKE';
 
 export const PLAYFIELD = {
+  /** Vertical FOV of the top-down camera. */
+  fov: 60,
   /** Visible height in world units when the screen is wide enough. */
   height: 24,
   /** Minimum visible width; narrow portrait screens pull the camera back to keep this. */
@@ -40,3 +42,29 @@ export const POWERUP = {
 };
 
 export const HISCORE_STORAGE_KEY = 'nova-strike:hiscore';
+
+export const WAVES = {
+  /** Formations in wave n (1-based) = base + perWave * (n - 1), capped. */
+  baseFormations: 7,
+  formationsPerWave: 2,
+  maxFormations: 18,
+};
+
+export const COCKPIT = {
+  fov: 72,
+  /** Seconds for the camera to fly into / out of the cockpit. */
+  enterDuration: 1.8,
+  exitDuration: 1.4,
+  /** Section ends (remaining enemies flee) after this many seconds. */
+  timeLimit: 24,
+  maxLocks: 8,
+  /** Minimum seconds between two locks on the same target while swiping. */
+  relockDelay: 0.2,
+  /** Minimum touch radius in CSS pixels for locking; small targets get this much slack. */
+  minLockRadiusPx: 34,
+  rocketSpeed: 34,
+  orbSpeed: 7,
+  orbSpeedPerWave: 0.8,
+  clearBonusPerWave: 1000,
+  timeBonusPerSecond: 50,
+};

@@ -52,6 +52,21 @@ won't work over plain-HTTP LAN; use the deployed GitHub Pages site to test those
   - **Dart** (orange): comes in snaking lines, fires straight down.
   - **Heavy** (purple): parks near the top, fires 5-way spreads, takes many hits.
 - Difficulty (spawn rate, bullet speed, fire rate, formations) ramps up over about 2.5 minutes.
+
+### Cockpit strikes (between waves)
+
+Each wave is a fixed number of formations. Once the last enemy is gone, the camera swoops down
+behind the ship into the cockpit for a first-person fight against a squadron ahead of you:
+
+- **Swipe over targets to lock on, lift your finger to fire** homing rockets at everything locked
+  (up to 8 locks). A single tap on a target also works.
+- Heavies need several locks: swipe over them repeatedly.
+- Kills from the same volley **chain**: the 2nd kill scores ×2, the 3rd ×3, and so on.
+- Enemies fire glowing plasma orbs at the cockpit. Lock and shoot them down before they hit you.
+- Clear the squadron before the timer runs out for a bonus (more for time left). If time runs
+  out, they escape.
+- The camera then flies back out and the next, harder wave starts. Squadrons grow and gain heavies
+  in later waves.
 - The high score is stored in `localStorage`. Add `?fps` to the URL to show an FPS meter
   (always on in dev).
 
@@ -82,12 +97,17 @@ src/
     Effects.ts             Explosion particles
     Starfield.ts           Parallax scrolling stars
     models.ts              Procedural placeholder models (ship, aliens, power-up)
+    CameraDirector.ts      Camera pose: top-down ↔ cockpit fly-in/out transition, shake
+    CockpitSection.ts      First-person strike: squadron, orbs, lock-on painting, homing rockets
+    WarpField.ts           Speed-line streaks shown in first person
   ui/
-    Hud.ts                 Score, high score, lives, weapon level, messages, FPS meter
+    Hud.ts                 Score, high score, wave, lives, weapon level, messages, FPS meter
+    CockpitOverlay.ts      Canopy frame, crosshair, lock reticles, timer, callouts, hit flash
 ```
 
-Gameplay happens on the z = 0 plane with +y as "up the screen"; the camera looks straight down
-the -z axis. Most balance changes go in `src/game/constants.ts`, `ENEMY_STATS` in `Enemy.ts`, and
+Gameplay happens on the z = 0 plane with +y as "up the screen"; the top-down camera looks straight
+down the -z axis. In the cockpit, the camera sits on the ship looking along +y with +z as up, so
+both views share one world. Most balance changes go in `src/game/constants.ts` (including `WAVES` and `COCKPIT`), `ENEMY_STATS` in `Enemy.ts`, and
 the formation rules in `WaveSpawner.ts`.
 
 ### Mobile notes

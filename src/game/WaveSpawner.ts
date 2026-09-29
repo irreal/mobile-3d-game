@@ -1,4 +1,5 @@
 import { MathUtils } from 'three';
+import { WAVES } from './constants.ts';
 import type { EnemyKind } from './Enemy.ts';
 
 export type SpawnFn = (kind: EnemyKind, x: number, yOffset: number, phase: number) => void;
@@ -19,20 +20,41 @@ const RULES: readonly FormationRule[] = [
   { formation: 'tank', from: 25, weight: 1 },
 ];
 
-/** Picks enemy formations over time; spawns get denser and more varied as play goes on. */
+/**
+ * Spawns a wave as a fixed number of formations picked over time; spawns get denser and
+ * more varied as play goes on. `done` turns true once the wave's last formation is out.
+ */
 export class WaveSpawner {
+  wave = 0;
   private timer = 1.2;
   private sinceTank = 0;
+  private formationsLeft = 0;
 
   reset(): void {
-    this.timer = 1.2;
+    this.wave = 0;
     this.sinceTank = 0;
+    this.formationsLeft = 0;
+  }
+
+  startWave(): void {
+    this.wave++;
+    this.timer = 1.5;
+    this.formationsLeft = Math.min(
+      WAVES.baseFormations + WAVES.formationsPerWave * (this.wave - 1),
+      WAVES.maxFormations,
+    );
+  }
+
+  get done(): boolean {
+    return this.formationsLeft <= 0;
   }
 
   update(dt: number, time: number, difficulty: number, halfWidth: number, spawn: SpawnFn): void {
+    if (this.done) return;
     this.sinceTank += dt;
     this.timer -= dt;
     if (this.timer > 0) return;
+    this.formationsLeft--;
 
     const formation = this.pick(time);
     const span = halfWidth - 1.2;

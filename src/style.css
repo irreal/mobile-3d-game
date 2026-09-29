@@ -150,3 +150,250 @@ body {
     opacity: 0.45;
   }
 }
+
+.hud-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.hud-wave {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: #ffb443;
+}
+
+/* --- Cockpit (first-person) overlay ------------------------------------------------ */
+
+.cockpit {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  overflow: hidden;
+  color: #9fe8ff;
+  text-shadow: 0 0 6px rgb(111 243 255 / 60%);
+}
+
+.cockpit-frame {
+  position: absolute;
+  inset: 0;
+  /* Canopy: tinted vignette plus angled struts in the corners. */
+  background:
+    linear-gradient(115deg, rgb(20 30 60 / 92%) 0 9%, transparent 9.2%),
+    linear-gradient(245deg, rgb(20 30 60 / 92%) 0 9%, transparent 9.2%),
+    radial-gradient(ellipse at 50% 45%, transparent 55%, rgb(40 120 200 / 22%) 80%, rgb(5 10 25 / 75%) 100%);
+  box-shadow: inset 0 0 0 2px rgb(111 243 255 / 20%);
+}
+
+.cockpit-frame::after {
+  /* Dashboard edge along the bottom. */
+  content: '';
+  position: absolute;
+  left: -10%;
+  right: -10%;
+  bottom: -40px;
+  height: 90px;
+  border-radius: 50% 50% 0 0;
+  background: linear-gradient(180deg, rgb(30 45 85 / 95%), rgb(8 12 28 / 98%));
+  border-top: 2px solid rgb(111 243 255 / 35%);
+}
+
+.cockpit-crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  border: 1.5px solid rgb(159 232 255 / 45%);
+  border-radius: 50%;
+}
+
+.cockpit-crosshair::before,
+.cockpit-crosshair::after {
+  content: '';
+  position: absolute;
+  background: rgb(159 232 255 / 55%);
+}
+
+.cockpit-crosshair::before {
+  left: 50%;
+  top: -10px;
+  bottom: -10px;
+  width: 1.5px;
+  margin-left: -0.75px;
+}
+
+.cockpit-crosshair::after {
+  top: 50%;
+  left: -10px;
+  right: -10px;
+  height: 1.5px;
+  margin-top: -0.75px;
+}
+
+.cockpit-reticles {
+  position: absolute;
+  inset: 0;
+}
+
+.cockpit-reticle {
+  position: absolute;
+  border: 2px solid #ff3d6e;
+  border-radius: 4px;
+  box-shadow: 0 0 10px rgb(255 61 110 / 70%);
+}
+
+.cockpit-reticle::before {
+  content: '';
+  position: absolute;
+  inset: 18%;
+  border: 1.5px dashed rgb(255 61 110 / 80%);
+  border-radius: 50%;
+  animation: reticle-spin 1.2s linear infinite;
+}
+
+.cockpit-reticle-count {
+  position: absolute;
+  right: -30px;
+  top: -18px;
+  font-size: 14px;
+  font-weight: 800;
+  color: #ff6b8e;
+  text-shadow: 0 0 6px rgb(255 61 110 / 80%);
+}
+
+.cockpit-brush {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 68px;
+  height: 68px;
+  margin: -34px 0 0 -34px;
+  border-radius: 50%;
+  border: 2px dashed rgb(159 232 255 / 70%);
+  opacity: 0;
+  transition: opacity 80ms;
+}
+
+.cockpit-brush.visible {
+  opacity: 1;
+}
+
+.cockpit-locks {
+  position: absolute;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom) + 18px);
+  transform: translateX(-50%);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.cockpit-locks.full {
+  color: #ff6b8e;
+}
+
+.cockpit-timer {
+  position: absolute;
+  left: 20%;
+  right: 20%;
+  top: calc(env(safe-area-inset-top) + 64px);
+  height: 4px;
+  border-radius: 2px;
+  background: rgb(159 232 255 / 18%);
+  overflow: hidden;
+}
+
+.cockpit-timer-fill {
+  width: 100%;
+  height: 100%;
+  background: #6ff3ff;
+  transform-origin: left center;
+}
+
+.cockpit-timer-fill.low {
+  background: #ff3d6e;
+}
+
+.cockpit-callout {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 26%;
+  text-align: center;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  white-space: pre-line;
+  color: #fff;
+  opacity: 0;
+}
+
+.cockpit-callout.pop {
+  animation: callout-pop 1s ease-out forwards;
+}
+
+.cockpit-hint {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: calc(env(safe-area-inset-bottom) + 64px);
+  text-align: center;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  line-height: 1.5;
+  opacity: 0;
+  transition: opacity 300ms;
+}
+
+.cockpit-hint.visible {
+  opacity: 1;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.cockpit-flash {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, rgb(255 40 80 / 15%), rgb(255 40 80 / 65%));
+  opacity: 0;
+}
+
+.cockpit-flash.on {
+  animation: hit-flash 450ms ease-out;
+}
+
+@keyframes reticle-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes callout-pop {
+  0% {
+    opacity: 0;
+    transform: scale(1.6);
+  }
+  15% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes hit-flash {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}

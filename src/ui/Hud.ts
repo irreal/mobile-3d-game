@@ -3,6 +3,7 @@ export class Hud {
   private readonly root: HTMLDivElement;
   private readonly score: HTMLDivElement;
   private readonly hiScore: HTMLDivElement;
+  private readonly wave: HTMLDivElement;
   private readonly lives: HTMLDivElement;
   private readonly weapon: HTMLDivElement;
   private readonly message: HTMLDivElement;
@@ -11,18 +12,21 @@ export class Hud {
   private readonly fps: HTMLDivElement | null;
   private frames = 0;
   private accumulated = 0;
-  private shown = { score: -1, hiScore: -1, lives: -1, weapon: -1 };
+  private shown = { score: -1, hiScore: -1, lives: -1, weapon: -1, wave: -1 };
 
   constructor(overlay: HTMLElement) {
     this.root = el('div', 'hud');
     const top = el('div', 'hud-top');
     this.score = el('div', 'hud-score');
     this.hiScore = el('div', 'hud-hiscore');
+    this.wave = el('div', 'hud-wave');
+    const center = el('div', 'hud-center');
+    center.append(this.hiScore, this.wave);
     const right = el('div', 'hud-right');
     this.lives = el('div', 'hud-lives');
     this.weapon = el('div', 'hud-weapon');
     right.append(this.lives, this.weapon);
-    top.append(this.score, this.hiScore, right);
+    top.append(this.score, center, right);
 
     this.message = el('div', 'hud-message');
     this.messageTitle = el('div', 'hud-message-title');
@@ -48,6 +52,13 @@ export class Hud {
     if (score === this.shown.hiScore) return;
     this.shown.hiScore = score;
     this.hiScore.textContent = `HI ${score.toLocaleString('en-US')}`;
+  }
+
+  /** 0 hides the wave indicator. */
+  setWave(wave: number): void {
+    if (wave === this.shown.wave) return;
+    this.shown.wave = wave;
+    this.wave.textContent = wave > 0 ? `WAVE ${wave}` : '';
   }
 
   setLives(lives: number): void {

@@ -4,8 +4,10 @@ import type { BufferGeometry, Material } from 'three';
 export interface PoolItem {
   x: number;
   y: number;
+  z: number;
   vx: number;
   vy: number;
+  vz: number;
   /** Seconds since spawn. */
   age: number;
   /** Seconds until auto-removal; Infinity for none. */
@@ -37,8 +39,10 @@ export class InstancedPool {
     this.items = Array.from({ length: capacity }, () => ({
       x: 0,
       y: 0,
+      z: 0,
       vx: 0,
       vy: 0,
+      vz: 0,
       age: 0,
       life: Infinity,
       scale: 1,
@@ -56,6 +60,8 @@ export class InstancedPool {
     item.y = y;
     item.vx = vx;
     item.vy = vy;
+    item.z = 0;
+    item.vz = 0;
     item.radius = radius;
     item.life = life;
     item.age = 0;
@@ -88,6 +94,7 @@ export class InstancedPool {
       const item = this.items[i]!;
       item.x += item.vx * dt;
       item.y += item.vy * dt;
+      item.z += item.vz * dt;
       item.age += dt;
       if (item.age >= item.life || (keep && !keep(item))) this.remove(i);
     }
@@ -97,7 +104,7 @@ export class InstancedPool {
   sync(): void {
     for (let i = 0; i < this.count; i++) {
       const item = this.items[i]!;
-      dummy.position.set(item.x, item.y, 0);
+      dummy.position.set(item.x, item.y, item.z);
       dummy.rotation.set(0, 0, item.rotation);
       dummy.scale.setScalar(item.scale);
       dummy.updateMatrix();

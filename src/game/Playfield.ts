@@ -1,5 +1,4 @@
 import { MathUtils } from 'three';
-import type { PerspectiveCamera } from 'three';
 import { PLAYFIELD } from './constants.ts';
 
 /**
@@ -14,8 +13,13 @@ export class Playfield {
   halfWidth = PLAYFIELD.minWidth / 2;
   worldPerPixel = 0.05;
   cameraDistance = 25;
+  widthPx = 1;
+  heightPx = 1;
 
-  fit(camera: PerspectiveCamera, widthPx: number, heightPx: number): void {
+  /** Recomputes bounds for a new screen size. Camera pose and FOV are left to `CameraDirector`. */
+  fit(widthPx: number, heightPx: number): void {
+    this.widthPx = widthPx;
+    this.heightPx = heightPx;
     const aspect = widthPx / heightPx;
     let halfH = PLAYFIELD.height / 2;
     let halfW = halfH * aspect;
@@ -28,10 +32,7 @@ export class Playfield {
     this.visibleHalfHeight = halfH;
     this.halfWidth = Math.min(halfW, PLAYFIELD.maxWidth / 2);
     this.worldPerPixel = (halfH * 2) / heightPx;
-    this.cameraDistance = halfH / Math.tan(MathUtils.degToRad(camera.fov / 2));
-
-    camera.position.set(0, 0, this.cameraDistance);
-    camera.lookAt(0, 0, 0);
+    this.cameraDistance = halfH / Math.tan(MathUtils.degToRad(PLAYFIELD.fov / 2));
   }
 
   get top(): number {
