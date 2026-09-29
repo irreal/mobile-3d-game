@@ -123,6 +123,25 @@ export class AudioEngine {
     return this.ctx?.state === 'running';
   }
 
+  /**
+   * AudioContext time that is reaching the speakers at `perfMs` (performance.now() time
+   * base). Lags `currentTime` by the output latency, so input can be judged against what
+   * the player actually hears.
+   */
+  audibleTime(perfMs = performance.now()): number {
+    const ctx = this.ctx;
+    if (!ctx) return 0;
+    const now = performance.now();
+    const ts = ctx.getOutputTimestamp?.();
+    if (ts?.contextTime !== undefined && ts.performanceTime) {
+      const heard = ts.contextTime + (now - ts.performanceTime) / 1000;
+      // Some implementations report stale or bogus timestamps; only trust sane ones.
+      if (heard <= ctx.currentTime + 0.02 && heard > ctx.currentTime - 0.5) return heard + (perfMs - now) / 1000;
+    }
+    const latency = (ctx.outputLatency || 0) + (ctx.baseLatency || 0);
+    return ctx.currentTime - latency + (perfMs - now) / 1000;
+  }
+
   setEchoTime(seconds: number): void {
     if (this.ctx) this.delay.delayTime.setTargetAtTime(seconds, this.ctx.currentTime, 0.05);
   }

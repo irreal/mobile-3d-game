@@ -121,7 +121,7 @@ export class ShooterScene implements GameScene {
   private readonly powerups: Powerup[] = [];
   private readonly drag: Vec2 = { x: 0, y: 0 };
   private readonly unsubscribeTap: () => void;
-  private readonly unsubscribeRelease: () => void;
+  private readonly unsubscribePress: () => void;
   private readonly enemyContext: EnemyContext;
   private readonly director = new CameraDirector();
   private readonly cockpitFill = new DirectionalLight(0xcfe0ff, 0);
@@ -149,7 +149,6 @@ export class ShooterScene implements GameScene {
   private messageTimer = 0;
   private paused = false;
   private cockpitTutorialDone = false;
-  private wasFocusing = false;
   /** Last requested music cutoff, restored after pausing. */
   private musicCutoff = 20000;
   private prevBlend = 0;
@@ -218,7 +217,7 @@ export class ShooterScene implements GameScene {
     this.scene.add(this.warp.object, this.interior.object);
     cockpitOverlay.setInterior(this.interior.available);
 
-    this.cockpit = new CockpitSection(this.scene, this.effects, cockpitOverlay, audio.sfx, {
+    this.cockpit = new CockpitSection(this.scene, this.effects, cockpitOverlay, audio.sfx, audio.music, {
       addScore: (points) => {
         this.score += points;
       },
@@ -241,9 +240,9 @@ export class ShooterScene implements GameScene {
     };
 
     this.unsubscribeTap = input.onTap(this.handleTap);
-    this.unsubscribeRelease = input.onRelease(() => {
+    this.unsubscribePress = input.onPress((x, y, time) => {
       if (this.frozen) return;
-      if (this.state === 'playing' && (this.phase === 'cockpit' || this.phase === 'toCockpit')) this.cockpit.fire();
+      if (this.state === 'playing' && this.phase === 'cockpit') this.cockpit.tap(x, y, time);
     });
     this.enterTitle();
   }
@@ -262,14 +261,14 @@ export class ShooterScene implements GameScene {
   update(realDt: number): void {
     this.input.update();
     if (this.frozen) {
+      this.cockpit.resync();
       this.input.consumeDrag(this.drag);
       this.director.update(0, this.camera, this.playfield.cameraDistance, this.player.x, this.player.y, 0);
       this.updateHud();
       return;
     }
-    // Cockpit Focus slows the whole world down, not just the fight.
-    const dt = realDt * this.cockpit.timeScale;
-    this.stateTime += realDt;
+    const dt = realDt;
+    this.stateTime += dt;
 
     const playing = this.state === 'playing';
     if (playing) {
@@ -359,7 +358,7 @@ export class ShooterScene implements GameScene {
           this.setMusicCutoff(450, COCKPIT.enterDuration * 0.8);
           const pf = this.playfield;
           const strike = this.spawner.wave / COCKPIT.everyWaves;
-          this.cockpit.start(this.player.x, this.player.y, strike, difficulty, pf.widthPx / pf.heightPx);
+          this.cockpit.start(this.player.x, this.player.y, strike, pf.widthPx / pf.heightPx);
         }
         break;
 
@@ -370,10 +369,6 @@ export class ShooterScene implements GameScene {
         if (this.phase === 'toCockpit' && this.director.inCockpit) this.bootHud();
         else if (this.phase === 'hudBoot' && this.phaseTime > COCKPIT.bootDuration) this.startCockpitFight();
         this.endSectionIfDone(this.updateCockpit(dt));
-        if (this.cockpit.focusing !== this.wasFocusing) {
-          this.wasFocusing = this.cockpit.focusing;
-          this.setMusicCutoff(this.wasFocusing ? 900 : 20000, 0.25);
-        }
         break;
 
       case 'sectionEnd':
@@ -417,15 +412,11 @@ export class ShooterScene implements GameScene {
   }
 
   private updateCockpit(dt: number): SectionStatus {
-    const input = this.input;
     const pf = this.playfield;
     return this.cockpit.update(dt, {
       camera: this.camera,
       eye: this.director.eye,
       active: this.phase === 'cockpit',
-      pointerDown: input.dragging,
-      pointerX: input.pointer.x,
-      pointerY: input.pointer.y,
       widthPx: pf.widthPx,
       heightPx: pf.heightPx,
     });
@@ -437,9 +428,16 @@ export class ShooterScene implements GameScene {
     this.setPhase('sectionEnd');
     if (status === 'cleared') {
       const wave = this.spawner.wave;
-      const bonus = COCKPIT.clearBonusPerWave * wave + Math.round(this.cockpit.timeLeft) * COCKPIT.timeBonusPerSecond;
+      const combo = this.cockpit.maxCombo;
+      const bonus =
+        COCKPIT.clearBonusPerWave * wave +
+        Math.round(this.cockpit.timeLeft) * COCKPIT.timeBonusPerSecond +
+        combo * COCKPIT.maxComboBonus;
       this.score += bonus;
-      this.cockpitOverlay.showCallout(`SQUADRON DESTROYED\n+${bonus.toLocaleString('en-US')}`, SECTION_END_PAUSE);
+      this.cockpitOverlay.showCallout(
+        `SQUADRON DESTROYED\nMAX COMBO ${combo}\n+${bonus.toLocaleString('en-US')}`,
+        SECTION_END_PAUSE,
+      );
       this.audio.sfx.squadronCleared();
     }
   }
@@ -501,7 +499,7 @@ export class ShooterScene implements GameScene {
 
   dispose(): void {
     this.unsubscribeTap();
-    this.unsubscribeRelease();
+    this.unsubscribePress();
     this.clearWorld();
     this.cockpit.dispose();
     this.warp.dispose();
@@ -553,7 +551,6 @@ export class ShooterScene implements GameScene {
     this.director.reset();
     this.cockpit.clear();
     this.cockpitTutorialDone = false;
-    this.wasFocusing = false;
     this.placePlayerAtStart();
     this.input.consumeDrag(this.drag);
     this.hud.hideMessage();
@@ -943,15 +940,13 @@ export class ShooterScene implements GameScene {
     this.fx.kickAberration(0.5 * strength);
   }
 
-  /** Zoom blur while the camera swoops between views, and the Focus slow-mo tint. */
+  /** Zoom blur while the camera swoops between views. */
   private updateFx(realDt: number): void {
     const blend = this.director.blend;
     const speed = realDt > 0 ? Math.abs(blend - this.prevBlend) / realDt : 0;
     this.prevBlend = blend;
     const transition = this.director.transitioning ? speed * COCKPIT.enterDuration * 0.45 : 0;
     this.fx.zoomBlur = MathUtils.damp(this.fx.zoomBlur, transition + blend * 0.06, 8, realDt);
-    const focusing = this.state === 'playing' && this.cockpit.focusing;
-    this.fx.focus = MathUtils.damp(this.fx.focus, focusing ? 1 : 0, 10, realDt);
     this.fx.aberration = blend * 0.15;
   }
 

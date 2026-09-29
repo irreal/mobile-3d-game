@@ -27,13 +27,13 @@ const CONTENT: Record<TutorialId, TutorialContent> = {
   },
   cockpit: {
     title: 'COCKPIT STRIKE',
-    art: 'tutorial-art-swipe',
+    art: 'tutorial-art-rhythm',
     lines: [
-      '<b>Swipe over targets</b> to lock on, then <b>lift your finger</b> to fire rockets.',
-      'Big ships need several locks. Kills in one volley <b>chain</b> for bonus points.',
-      'While your finger is down, time slows (<b>Focus</b>). Watch the meter!',
-      'Fill all <b>8 locks</b> to <b>Overcharge</b>: rockets blast everything nearby.',
-      'Lock onto incoming orbs to shoot them down.',
+      'Rings close onto targets <b>on the beat</b>. <b>Tap the target</b> the moment its ring lines up.',
+      'Each hit fires a rocket that lands on the music. Heavies (orange) need several hits.',
+      'The bar at the bottom shows the <b>upcoming beats</b>.',
+      '<b>Pink orbs</b> are incoming fire: tap them on their beat too, or take a hit.',
+      'Miss and the target dodges and shoots back. Chain hits for a <b>combo</b> and <b>Overdrive</b>!',
     ],
   },
 };

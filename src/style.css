@@ -251,66 +251,221 @@ body {
   margin-top: -0.75px;
 }
 
-.cockpit-reticles {
+.cockpit-pulse {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 64px;
+  height: 64px;
+  margin: -32px 0 0 -32px;
+  border: 2px solid rgb(159 232 255 / 80%);
+  border-radius: 50%;
+  box-shadow: 0 0 12px rgb(111 243 255 / 50%);
+  opacity: 0;
+}
+
+.cockpit-notes {
   position: absolute;
   inset: 0;
 }
 
-.cockpit-reticle {
-  position: absolute;
-  border: 2px solid #ff3d6e;
-  border-radius: 4px;
-  box-shadow: 0 0 10px rgb(255 61 110 / 70%);
-}
-
-.cockpit-reticle::before {
-  content: '';
-  position: absolute;
-  inset: 18%;
-  border: 1.5px dashed rgb(255 61 110 / 80%);
-  border-radius: 50%;
-  animation: reticle-spin 1.2s linear infinite;
-}
-
-.cockpit-reticle-count {
-  position: absolute;
-  right: -30px;
-  top: -18px;
-  font-size: 14px;
-  font-weight: 800;
-  color: #ff6b8e;
-  text-shadow: 0 0 6px rgb(255 61 110 / 80%);
-}
-
-.cockpit-brush {
+.cockpit-note {
+  --note: #6ff3ff;
   position: absolute;
   left: 0;
   top: 0;
-  width: 68px;
-  height: 68px;
-  margin: -34px 0 0 -34px;
+  border: 2px solid var(--note);
   border-radius: 50%;
-  border: 2px dashed rgb(159 232 255 / 70%);
+  background: radial-gradient(circle, transparent 55%, color-mix(in srgb, var(--note) 22%, transparent) 100%);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--note) 60%, transparent);
+}
+
+.cockpit-note.heavy {
+  --note: #ffb443;
+}
+
+.cockpit-note.orb {
+  --note: #ff4f8b;
+  border-style: dashed;
+}
+
+.cockpit-note.now {
+  border-width: 3px;
+  box-shadow: 0 0 18px var(--note);
+}
+
+.cockpit-note-ring {
+  position: absolute;
+  inset: -2px;
+  border: 3px solid var(--note);
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--note);
+}
+
+.cockpit-popups {
+  position: absolute;
+  inset: 0;
+}
+
+.cockpit-judge {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
   opacity: 0;
-  transition: opacity 80ms;
 }
 
-.cockpit-brush.visible {
-  opacity: 1;
+.cockpit-judge.pop {
+  animation: judge-pop 0.6s ease-out forwards;
 }
 
-.cockpit-locks {
+.cockpit-judge.perfect {
+  color: #ffe98a;
+  text-shadow: 0 0 10px rgb(255 210 61 / 90%);
+  font-size: 17px;
+}
+
+.cockpit-judge.great {
+  color: #9fffc4;
+  text-shadow: 0 0 8px rgb(87 227 137 / 80%);
+}
+
+.cockpit-judge.good {
+  color: #9fe8ff;
+}
+
+.cockpit-judge.miss {
+  color: #ff6b8e;
+  text-shadow: 0 0 8px rgb(255 61 110 / 80%);
+}
+
+@keyframes judge-pop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.5);
+  }
+  15% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -110%) scale(1);
+  }
+}
+
+/* Beat lane: notes scroll left toward the hit line; ticks mark each beat. */
+.cockpit-lane {
   position: absolute;
   left: 50%;
-  bottom: calc(env(safe-area-inset-bottom) + 18px);
+  bottom: calc(env(safe-area-inset-bottom) + 30px);
+  width: min(84vw, 440px);
+  height: 26px;
   transform: translateX(-50%);
-  font-size: 15px;
-  font-weight: 700;
+  border-radius: 13px;
+  background: rgb(5 12 30 / 55%);
+  box-shadow: inset 0 0 0 1px rgb(111 243 255 / 25%);
+  overflow: hidden;
+}
+
+.cockpit-lane-hit {
+  position: absolute;
+  left: 16%;
+  top: 2px;
+  bottom: 2px;
+  width: 22px;
+  margin-left: -11px;
+  border: 2px solid rgb(255 255 255 / 85%);
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgb(111 243 255 / 80%);
+}
+
+.cockpit-lane-tick {
+  position: absolute;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 1px;
+  background: rgb(159 232 255 / 30%);
+}
+
+.cockpit-lane-tick.bar {
+  top: 3px;
+  bottom: 3px;
+  width: 2px;
+  background: rgb(159 232 255 / 55%);
+}
+
+.cockpit-lane-note {
+  position: absolute;
+  left: -7px;
+  top: 6px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #6ff3ff;
+  box-shadow: 0 0 8px #6ff3ff;
+}
+
+.cockpit-lane-note.heavy {
+  background: #ffb443;
+  box-shadow: 0 0 8px #ffb443;
+}
+
+.cockpit-lane-note.orb {
+  background: #ff4f8b;
+  box-shadow: 0 0 8px #ff4f8b;
+  border-radius: 3px;
+  transform-origin: center;
+}
+
+.cockpit-combo {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(env(safe-area-inset-bottom) + 64px);
+  text-align: center;
+  font-size: 13px;
   letter-spacing: 0.14em;
 }
 
-.cockpit-locks.full {
-  color: #ff6b8e;
+.cockpit-combo b {
+  font-size: 22px;
+  color: #fff;
+}
+
+.cockpit-combo i {
+  font-style: normal;
+  color: #ffd23d;
+}
+
+.cockpit-combo.bump {
+  animation: combo-bump 0.18s ease-out;
+}
+
+@keyframes combo-bump {
+  from {
+    transform: scale(1.18);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.cockpit.overdrive .cockpit-combo,
+.cockpit.overdrive .cockpit-combo b {
+  color: #ffd23d;
+  text-shadow: 0 0 10px rgb(255 210 61 / 90%);
+}
+
+.cockpit.overdrive .cockpit-pulse {
+  border-color: #ffd23d;
+  box-shadow: 0 0 16px rgb(255 210 61 / 70%);
 }
 
 .cockpit-timer {
@@ -357,7 +512,7 @@ body {
   position: absolute;
   left: 8%;
   right: 8%;
-  bottom: calc(env(safe-area-inset-bottom) + 84px);
+  bottom: calc(env(safe-area-inset-bottom) + 104px);
   text-align: center;
   font-size: 13px;
   letter-spacing: 0.1em;
@@ -380,12 +535,6 @@ body {
 
 .cockpit-flash.on {
   animation: hit-flash 450ms ease-out;
-}
-
-@keyframes reticle-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 @keyframes callout-pop {
@@ -524,7 +673,8 @@ body {
 }
 
 .cockpit.booting .cockpit-timer,
-.cockpit.booting .cockpit-locks {
+.cockpit.booting .cockpit-lane,
+.cockpit.booting .cockpit-combo {
   animation: boot-fade 0.3s 1.2s both;
 }
 
@@ -620,55 +770,18 @@ body {
   }
 }
 
-/* --- Cockpit focus (slow-mo) --------------------------------------------------------- */
-
-.cockpit-focus {
-  position: absolute;
-  left: 50%;
-  bottom: calc(env(safe-area-inset-bottom) + 46px);
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 10px;
-  letter-spacing: 0.14em;
-}
-
-.cockpit-focus-track {
-  width: 110px;
-  height: 5px;
-  border-radius: 3px;
-  background: rgb(159 232 255 / 18%);
-  overflow: hidden;
-}
-
-.cockpit-focus-fill {
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, #b48cff, #6ff3ff);
-  transform-origin: left center;
-}
-
-.cockpit-focus.empty {
-  color: #ff6b8e;
-}
-
+/* Overdrive: gold glow around the view edges. */
 .cockpit::before {
-  /* Slow-mo tint: violet vignette that fades in while focusing. */
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse at center, transparent 45%, rgb(120 70 255 / 38%) 100%);
+  background: radial-gradient(ellipse at center, transparent 55%, rgb(255 190 40 / 22%) 100%);
   opacity: 0;
-  transition: opacity 200ms ease-out;
+  transition: opacity 300ms ease-out;
 }
 
-.cockpit.focusing::before {
+.cockpit.overdrive::before {
   opacity: 1;
-}
-
-.cockpit.booting .cockpit-focus {
-  animation: boot-fade 0.3s 1.3s both;
 }
 
 /* --- Version, pause button ------------------------------------------------------------ */
@@ -879,54 +992,91 @@ body {
   }
 }
 
-/* Cockpit: a finger sweeping across a row of targets that light up as locked. */
-.tutorial-art-swipe .tutorial-target {
-  left: 18%;
-  right: 18%;
-  top: 38%;
-  height: 22px;
-  background:
-    radial-gradient(circle, #57e389 7px, transparent 8px) 0 50% / 33.3% 100% repeat-x;
-  animation: tut-lock 2.4s linear infinite;
+/* Cockpit: a ring closes onto a target; the finger taps as it lines up. */
+.tutorial-art-rhythm .tutorial-target {
+  left: 50%;
+  top: 42%;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  border: 2px solid #6ff3ff;
+  border-radius: 50%;
+  box-shadow: 0 0 10px #6ff3ff;
+  animation: tut-hit 1.6s linear infinite;
 }
 
-.tutorial-art-swipe .tutorial-finger {
-  top: 50%;
-  animation: tut-swipe 2.4s ease-in-out infinite;
+.tutorial-art-rhythm .tutorial-target::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border: 3px solid #6ff3ff;
+  border-radius: 50%;
+  animation: tut-ring 1.6s linear infinite;
 }
 
-@keyframes tut-swipe {
+.tutorial-art-rhythm .tutorial-finger {
+  left: 50%;
+  top: 42%;
+  margin: -6px 0 0 -2px;
+  width: 26px;
+  height: 26px;
+  animation: tut-tap 1.6s ease-in infinite;
+}
+
+@keyframes tut-ring {
   0% {
-    left: 15%;
+    transform: scale(3.2);
+    opacity: 0;
+  }
+  15% {
     opacity: 1;
   }
   60% {
-    left: 85%;
+    transform: scale(1);
     opacity: 1;
   }
-  70%,
+  61%,
   100% {
-    left: 85%;
+    transform: scale(1);
     opacity: 0;
   }
 }
 
-@keyframes tut-lock {
+@keyframes tut-hit {
   0%,
-  10% {
+  58% {
     filter: none;
-    outline: 0 solid transparent;
+    transform: none;
   }
-  60% {
-    filter: drop-shadow(0 0 6px #ff3d6e) hue-rotate(160deg);
+  62% {
+    filter: brightness(2.5) drop-shadow(0 0 10px #ffd23d);
+    transform: scale(1.25);
   }
-  75% {
-    filter: brightness(3) drop-shadow(0 0 10px #ffd23d);
-  }
-  90%,
+  80%,
   100% {
     filter: none;
-    opacity: 0.2;
+    transform: none;
+    opacity: 0.4;
+  }
+}
+
+@keyframes tut-tap {
+  0%,
+  35% {
+    transform: translate(30px, 40px);
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+  60% {
+    transform: translate(0, 0) scale(0.85);
+    opacity: 1;
+  }
+  75%,
+  100% {
+    transform: translate(10px, 18px);
+    opacity: 0;
   }
 }
 

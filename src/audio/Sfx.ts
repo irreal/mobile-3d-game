@@ -17,11 +17,10 @@ export class Sfx {
 
   constructor(private readonly a: AudioEngine) {}
 
-  private throttled(name: string): boolean {
-    const now = this.a.now;
+  private throttled(name: string, time = this.a.now): boolean {
     const min = THROTTLE[name] ?? 0;
-    if (now - (this.last.get(name) ?? -Infinity) < min) return true;
-    this.last.set(name, now);
+    if (Math.abs(time - (this.last.get(name) ?? -Infinity)) < min) return true;
+    this.last.set(name, time);
     return false;
   }
 
@@ -32,9 +31,10 @@ export class Sfx {
     this.a.tone({ type: 'square', freq: 1400, to: 520, duration: 0.06, gain: 0.035 });
   }
 
-  hit(): void {
-    if (this.throttled('hit')) return;
-    this.a.tone({ type: 'triangle', freq: 420, to: 180, duration: 0.05, gain: 0.07 });
+  /** `time` schedules the sound on the AudioContext clock (e.g. on a beat). */
+  hit(time?: number): void {
+    if (this.throttled('hit', time)) return;
+    this.a.tone({ type: 'triangle', freq: 420, to: 180, time, duration: 0.05, gain: 0.07 });
   }
 
   enemyShot(): void {
@@ -42,16 +42,17 @@ export class Sfx {
     this.a.tone({ type: 'sine', freq: 620, to: 260, duration: 0.14, gain: 0.05 });
   }
 
-  explosion(size: 'small' | 'big' = 'small'): void {
-    if (this.throttled('explosion')) return;
+  explosion(size: 'small' | 'big' = 'small', time?: number): void {
+    if (this.throttled('explosion', time)) return;
     const big = size === 'big';
     const d = big ? 1.1 : 0.45;
     this.a.noise({
+      time,
       duration: d,
       gain: big ? 0.7 : 0.35,
       filter: { type: 'lowpass', freq: big ? 2400 : 3200, to: 120, q: 1 },
     });
-    this.a.tone({ freq: big ? 110 : 150, to: 32, duration: d * 0.8, gain: big ? 0.7 : 0.35 });
+    this.a.tone({ freq: big ? 110 : 150, to: 32, time, duration: d * 0.8, gain: big ? 0.7 : 0.35 });
   }
 
   playerHit(): void {
@@ -185,11 +186,24 @@ export class Sfx {
 
   // --- Cockpit ---------------------------------------------------------------------------
 
-  /** Lock-on blip; pitch climbs with each lock in the current volley. */
-  lock(count: number, max: number): void {
-    const full = count >= max;
-    this.a.tone({ type: 'square', freq: 700 * 2 ** ((count - 1) / 6), duration: 0.07, gain: 0.07 });
-    if (full) this.a.tone({ type: 'square', freq: 2100, time: this.a.now + 0.07, duration: 0.12, gain: 0.06 });
+  /** On-beat target hit: a pluck on `midi` (a tone of the current chord); brighter when perfect. */
+  noteHit(midi: number, perfect: boolean): void {
+    const freq = 440 * 2 ** ((midi - 69) / 12);
+    this.a.tone({
+      type: 'square',
+      freq,
+      duration: 0.16,
+      gain: 0.07,
+      filter: { type: 'lowpass', freq: perfect ? 6000 : 2800, to: 900 },
+    });
+    this.a.tone({ type: 'triangle', freq: freq * 2, duration: 0.1, gain: perfect ? 0.06 : 0.03 });
+    this.a.tone({ type: 'square', freq, duration: 0.08, gain: 0.025, destination: this.a.echo });
+  }
+
+  /** Off-beat or missed note: a short detuned buzz. */
+  miss(): void {
+    this.a.tone({ type: 'sawtooth', freq: 140, to: 90, duration: 0.14, gain: 0.08, filter: { type: 'lowpass', freq: 900 } });
+    this.a.tone({ type: 'sawtooth', freq: 147, to: 95, duration: 0.14, gain: 0.06, filter: { type: 'lowpass', freq: 900 } });
   }
 
   rocket(): void {
@@ -206,18 +220,8 @@ export class Sfx {
     this.a.tone({ freq: 120, to: 50, duration: 0.3, gain: 0.25 });
   }
 
-  /** Slow-mo engage: pitch drops like time stretching. */
-  focusIn(): void {
-    this.a.tone({ type: 'sine', freq: 520, to: 140, duration: 0.35, gain: 0.1 });
-    this.a.noise({ duration: 0.35, gain: 0.08, filter: { type: 'lowpass', freq: 2000, to: 200 } });
-  }
-
-  focusOut(): void {
-    this.a.tone({ type: 'sine', freq: 160, to: 480, duration: 0.2, gain: 0.07 });
-  }
-
-  /** Full-lock volley. */
-  overcharge(): void {
+  /** Combo reached Overdrive. */
+  overdrive(): void {
     const t = this.a.now;
     this.a.tone({ type: 'sawtooth', freq: 220, to: 880, duration: 0.3, gain: 0.08, filter: { type: 'lowpass', freq: 3000 } });
     [0, 7, 12].forEach((semi, i) => {
@@ -232,12 +236,6 @@ export class Sfx {
   orbPop(): void {
     if (this.throttled('trailPop')) return;
     this.a.tone({ type: 'triangle', freq: 1200, to: 300, duration: 0.12, gain: 0.08 });
-  }
-
-  chain(count: number): void {
-    const semi = Math.min(count, 10) * 2;
-    this.a.tone({ type: 'triangle', freq: 880 * 2 ** (semi / 12), duration: 0.25, gain: 0.1 });
-    this.a.tone({ type: 'sine', freq: 1760 * 2 ** (semi / 12), duration: 0.3, gain: 0.05 });
   }
 
   squadronCleared(): void {

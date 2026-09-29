@@ -1,53 +1,74 @@
-export interface LockMarker {
+export type NoteStyle = 'strike' | 'heavy' | 'orb';
+export type Grade = 'perfect' | 'great' | 'good' | 'miss';
+
+export interface NoteMarker {
   x: number;
   y: number;
-  /** Rockets queued on this target. */
-  count: number;
-  /** Radius of the reticle in CSS pixels. */
+  /** Radius of the target circle in CSS pixels. */
   size: number;
+  /** 1 when the approach ring appears, 0 when it closes (the moment to tap). */
+  approach: number;
+  style: NoteStyle;
 }
 
+export interface LaneNote {
+  /** Beats until the note (negative once it is late). */
+  beats: number;
+  style: NoteStyle;
+}
+
+/** Beats of look-ahead shown on the beat lane. */
+const LANE_BEATS = 4;
+/** Hit line position along the lane (0..1 from the left). */
+const LANE_HIT = 0.16;
+const POPUPS = 8;
+
 /**
- * DOM layer for the first-person section: canopy frame, crosshair, lock-on reticles
- * that track targets, a timer bar, lock counter, callouts and hit flash.
+ * DOM layer for the first-person section: canopy frame, beat-pulsing crosshair, approach
+ * rings that track targets, a scrolling beat lane, combo, timer, callouts and hit flash.
  */
 export class CockpitOverlay {
   private readonly root: HTMLDivElement;
-  private readonly reticleLayer: HTMLDivElement;
-  private readonly reticles: HTMLDivElement[] = [];
-  private readonly brush: HTMLDivElement;
-  private readonly lockCount: HTMLDivElement;
+  private readonly pulse: HTMLDivElement;
+  private readonly noteLayer: HTMLDivElement;
+  private readonly notes: HTMLDivElement[] = [];
+  private readonly lane: HTMLDivElement;
+  private readonly laneItems: HTMLDivElement[] = [];
+  private readonly combo: HTMLDivElement;
+  private readonly popups: HTMLDivElement[] = [];
   private readonly timerFill: HTMLDivElement;
-  private readonly focusFill: HTMLDivElement;
-  private readonly focusMeter: HTMLDivElement;
   private readonly callout: HTMLDivElement;
   private readonly hint: HTMLDivElement;
   private readonly flash: HTMLDivElement;
   private readonly letterboxTop: HTMLDivElement;
   private readonly letterboxBottom: HTMLDivElement;
+  private nextPopup = 0;
   private calloutTimer = 0;
   private bootTimer = 0;
+  private shownCombo = -1;
 
   constructor(overlay: HTMLElement) {
     this.root = div('cockpit');
-    this.root.append(div('cockpit-frame'), div('cockpit-crosshair'));
-    this.reticleLayer = div('cockpit-reticles');
-    this.brush = div('cockpit-brush');
-    this.lockCount = div('cockpit-locks');
+    const crosshair = div('cockpit-crosshair');
+    this.pulse = div('cockpit-pulse');
+    this.root.append(div('cockpit-frame'), this.pulse, crosshair);
+    this.noteLayer = div('cockpit-notes');
+    this.lane = div('cockpit-lane');
+    this.lane.append(div('cockpit-lane-hit'));
+    this.combo = div('cockpit-combo');
     const timer = div('cockpit-timer');
     this.timerFill = div('cockpit-timer-fill');
     timer.append(this.timerFill);
-    this.focusMeter = div('cockpit-focus');
-    const focusLabel = div('cockpit-focus-label');
-    focusLabel.textContent = 'FOCUS';
-    const focusTrack = div('cockpit-focus-track');
-    this.focusFill = div('cockpit-focus-fill');
-    focusTrack.append(this.focusFill);
-    this.focusMeter.append(focusLabel, focusTrack);
     this.callout = div('cockpit-callout');
     this.hint = div('cockpit-hint');
-    this.hint.textContent = 'SWIPE OVER TARGETS TO LOCK · RELEASE TO FIRE';
+    this.hint.textContent = 'TAP EACH TARGET AS ITS RING CLOSES · ON THE BEAT';
     this.flash = div('cockpit-flash');
+    const popupLayer = div('cockpit-popups');
+    for (let i = 0; i < POPUPS; i++) {
+      const p = div('cockpit-judge');
+      popupLayer.append(p);
+      this.popups.push(p);
+    }
     const boot = div('cockpit-boot');
     for (const line of BOOT_LINES) {
       const row = div('cockpit-boot-line');
@@ -55,10 +76,10 @@ export class CockpitOverlay {
       boot.append(row);
     }
     this.root.append(
-      this.reticleLayer,
-      this.brush,
-      this.lockCount,
-      this.focusMeter,
+      this.noteLayer,
+      popupLayer,
+      this.lane,
+      this.combo,
       timer,
       this.callout,
       this.hint,
@@ -91,12 +112,12 @@ export class CockpitOverlay {
     this.letterboxBottom.style.transform = `translateY(${hidden}%)`;
   }
 
-  /** 0 hides everything; 1 is fully shown. */
   /** With a 3D cockpit interior, the painted canopy frame and dashboard are dropped. */
   setInterior(on: boolean): void {
     this.root.classList.toggle('with-interior', on);
   }
 
+  /** 0 hides everything; 1 is fully shown. */
   setOpacity(opacity: number): void {
     this.root.style.opacity = String(opacity);
     this.root.style.visibility = opacity > 0.01 ? 'visible' : 'hidden';
@@ -106,44 +127,87 @@ export class CockpitOverlay {
     this.hint.classList.toggle('visible', visible);
   }
 
-  setLocks(markers: readonly LockMarker[], total: number, max: number): void {
-    while (this.reticles.length < markers.length) {
-      const r = div('cockpit-reticle');
-      r.append(div('cockpit-reticle-count'));
-      this.reticleLayer.append(r);
-      this.reticles.push(r);
+  /** Target circles with their closing approach rings. */
+  setNotes(markers: readonly NoteMarker[]): void {
+    while (this.notes.length < markers.length) {
+      const n = div('cockpit-note');
+      n.append(div('cockpit-note-ring'));
+      this.noteLayer.append(n);
+      this.notes.push(n);
     }
-    this.reticles.forEach((r, i) => {
+    this.notes.forEach((n, i) => {
       const m = markers[i];
       if (!m) {
-        r.style.display = 'none';
+        n.style.display = 'none';
         return;
       }
-      r.style.display = '';
-      r.style.left = `${m.x - m.size}px`;
-      r.style.top = `${m.y - m.size}px`;
-      r.style.width = r.style.height = `${m.size * 2}px`;
-      (r.firstChild as HTMLDivElement).textContent = m.count > 1 ? `×${m.count}` : '';
+      n.style.display = '';
+      n.className = `cockpit-note ${m.style}${m.approach < 0.12 ? ' now' : ''}`;
+      n.style.transform = `translate(${m.x - m.size}px, ${m.y - m.size}px)`;
+      n.style.width = n.style.height = `${m.size * 2}px`;
+      const ring = n.firstChild as HTMLDivElement;
+      ring.style.transform = `scale(${1 + Math.max(0, m.approach) * 2.2})`;
+      ring.style.opacity = String(Math.min(1, (1 - m.approach) * 4));
     });
-    this.lockCount.textContent = `LOCK ${total}/${max}`;
-    this.lockCount.classList.toggle('full', total >= max);
   }
 
-  /** Shows the swipe cursor at (x, y), or hides it when `x` is null. */
-  setBrush(x: number | null, y = 0): void {
-    if (x === null) {
-      this.brush.classList.remove('visible');
-      return;
+  /** Scrolls the beat lane (notes and beat ticks) and pulses the crosshair on the beat. */
+  setBeat(beat: number, notes: readonly LaneNote[]): void {
+    const width = this.lane.clientWidth;
+    const hitX = width * LANE_HIT;
+    const perBeat = (width - hitX) / LANE_BEATS;
+    let used = 0;
+    const place = (cls: string, beats: number): void => {
+      let item = this.laneItems[used];
+      if (!item) {
+        item = div('');
+        this.lane.append(item);
+        this.laneItems.push(item);
+      }
+      used++;
+      item.className = cls;
+      item.style.display = '';
+      item.style.transform = `translateX(${hitX + beats * perBeat}px)`;
+    };
+    for (let b = Math.ceil(beat - 0.5); b <= beat + LANE_BEATS; b++) {
+      place(b % 4 === 0 ? 'cockpit-lane-tick bar' : 'cockpit-lane-tick', b - beat);
     }
-    this.brush.classList.add('visible');
-    this.brush.style.transform = `translate(${x}px, ${y}px)`;
+    for (const n of notes) {
+      if (n.beats > LANE_BEATS || n.beats < -0.5) continue;
+      place(`cockpit-lane-note ${n.style}`, n.beats);
+    }
+    for (let i = used; i < this.laneItems.length; i++) this.laneItems[i]!.style.display = 'none';
+
+    const frac = beat - Math.floor(beat);
+    const downbeat = ((Math.floor(beat) % 4) + 4) % 4 === 0;
+    const kick = (1 - frac) ** 3;
+    this.pulse.style.transform = `scale(${1 + kick * (downbeat ? 0.5 : 0.3)})`;
+    this.pulse.style.opacity = String(0.15 + kick * (downbeat ? 0.7 : 0.45));
   }
 
-  /** Focus meter level (0..1); `active` tints the view for the slow-mo. */
-  setFocus(level: number, active: boolean): void {
-    this.focusFill.style.transform = `scaleX(${level})`;
-    this.focusMeter.classList.toggle('empty', level <= 0.01);
-    this.root.classList.toggle('focusing', active);
+  /** Pops a judgement label ("PERFECT", "MISS", …) at a screen position. */
+  judgement(text: string, grade: Grade, x: number, y: number): void {
+    const p = this.popups[this.nextPopup]!;
+    this.nextPopup = (this.nextPopup + 1) % this.popups.length;
+    p.textContent = text;
+    p.className = `cockpit-judge ${grade}`;
+    p.style.left = `${x}px`;
+    p.style.top = `${y}px`;
+    void p.offsetWidth;
+    p.classList.add('pop');
+  }
+
+  setCombo(combo: number, multiplier: number, overdrive: boolean): void {
+    this.root.classList.toggle('overdrive', overdrive);
+    if (combo === this.shownCombo) return;
+    const grew = combo > this.shownCombo;
+    this.shownCombo = combo;
+    this.combo.innerHTML =
+      combo >= 2 ? `<b>${combo}</b> COMBO${multiplier > 1 ? ` <i>×${multiplier}</i>` : ''}` : '';
+    if (!grew) return;
+    this.combo.classList.remove('bump');
+    void this.combo.offsetWidth;
+    this.combo.classList.add('bump');
   }
 
   setTimer(fraction: number): void {
@@ -178,12 +242,14 @@ export class CockpitOverlay {
   }
 
   reset(): void {
-    this.setLocks([], 0, 1);
-    this.setBrush(null);
+    this.setNotes([]);
+    for (const item of this.laneItems) item.style.display = 'none';
+    for (const p of this.popups) p.classList.remove('pop');
+    this.setCombo(0, 1, false);
     this.callout.classList.remove('pop');
     this.calloutTimer = 0;
     this.bootTimer = 0;
-    this.root.classList.remove('booting', 'focusing');
+    this.root.classList.remove('booting');
   }
 }
 
@@ -191,7 +257,7 @@ const BOOT_LINES = [
   'NOVA-7 FLIGHT SYSTEMS',
   'POWER ········ OK',
   'SENSORS ······ OK',
-  'TARGETING ···· ONLINE',
+  'BEAT SYNC ···· LOCKED',
   '▸ WEAPONS FREE',
 ];
 

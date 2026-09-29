@@ -104,7 +104,6 @@ export const COCKPIT = {
   bootDuration: 1.8,
   /** Section ends (remaining enemies flee) after this many seconds. */
   timeLimit: 45,
-  maxLocks: 8,
   /** A cockpit strike happens after every this many waves. */
   everyWaves: 2,
   /** The squadron warps in over this many rounds of reinforcements. */
@@ -113,20 +112,25 @@ export const COCKPIT = {
   nextRoundWhenLeft: 1,
   /** ...or after this many seconds, whichever comes first. */
   roundTime: 13,
-  /** Minimum seconds between two locks on the same target while swiping. */
-  relockDelay: 0.2,
-  /** Minimum touch radius in CSS pixels for locking; small targets get this much slack. */
-  minLockRadiusPx: 34,
-  rocketSpeed: 34,
-  /** Time scale while Focus (slow-mo) is active, i.e. while a finger is painting locks. */
-  focusTimeScale: 0.3,
-  /** Focus meter (0..1) drained per real second while focusing, and recharged while not. */
-  focusDrain: 0.4,
-  focusRecharge: 0.18,
-  /** A full-lock volley is Overcharged: each rocket also damages everything this close. */
-  overchargeRadius: 5,
-  orbSpeed: 7,
-  orbSpeedPerWave: 0.8,
+  /** Beats an approach ring takes to close onto its target. */
+  approachBeats: 2,
+  /** Timing windows (ms either side of the beat) for each judgement. */
+  perfectMs: 70,
+  greatMs: 130,
+  goodMs: 200,
+  /** Tapping a target earlier than `goodMs` but within this is a MISS (no spamming). */
+  earlyMissMs: 350,
+  /** Added to tap times to compensate for touch latency; raise if hits feel late. */
+  inputOffsetMs: 0,
+  /** Minimum touch radius in CSS pixels, as a fraction of the shorter screen side. */
+  hitRadius: 0.13,
+  /** Beats an orb takes from launch to the moment it must be shot down. */
+  orbBeats: 2,
+  /** Combo needed for Overdrive (gold rockets, double points). */
+  overdriveCombo: 16,
+  /** Combo steps that each add +0.5 to the score multiplier (before Overdrive). */
+  comboStep: 8,
   clearBonusPerWave: 1000,
   timeBonusPerSecond: 50,
+  maxComboBonus: 25,
 };

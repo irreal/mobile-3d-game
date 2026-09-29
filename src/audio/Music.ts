@@ -11,6 +11,8 @@ interface Playback {
   out: GainNode;
   step: number;
   nextTime: number;
+  /** AudioContext time of step 0; beat `b` plays at `origin + b * 60 / bpm`. */
+  origin: number;
 }
 
 /**
@@ -37,7 +39,8 @@ export class Music {
     out.gain.setValueAtTime(0, ctx.currentTime);
     out.gain.linearRampToValueAtTime(1, ctx.currentTime + fadeIn);
     out.connect(this.audio.music);
-    this.current = { song, out, step: 0, nextTime: ctx.currentTime + 0.08 };
+    const start = ctx.currentTime + 0.08;
+    this.current = { song, out, step: 0, nextTime: start, origin: start };
     this.audio.setEchoTime((60 / song.bpm) * 0.75);
     this.timer ??= window.setInterval(this.tick, TICK_MS);
   }
@@ -54,6 +57,27 @@ export class Music {
     window.setTimeout(() => playback.out.disconnect(), (fadeOut + 0.5) * 1000);
   }
 
+  /** Position of the playing song in beats, as heard at `perfMs` (performance.now() time base). */
+  beatAt(perfMs = performance.now()): number | null {
+    const p = this.current;
+    if (!p || !this.audio.running) return null;
+    return ((this.audio.audibleTime(perfMs) - p.origin) * p.song.bpm) / 60;
+  }
+
+  /** AudioContext time at which `beat` of the playing song is scheduled. */
+  timeOfBeat(beat: number): number | null {
+    const p = this.current;
+    return p ? p.origin + (beat * 60) / p.song.bpm : null;
+  }
+
+  /** Pad chord (MIDI notes) under `beat` of the playing song. */
+  chordAt(beat: number): readonly number[] | null {
+    const bars = this.current?.song.bars;
+    if (!bars) return null;
+    const bar = Math.floor(beat / 4);
+    return bars[((bar % bars.length) + bars.length) % bars.length]!.chord;
+  }
+
   /** Smoothly moves the music low-pass cutoff (used to "muffle" music during transitions). */
   setCutoff(hz: number, seconds: number): void {
     const ctx = this.audio.ctx;
@@ -68,9 +92,12 @@ export class Music {
     const ctx = this.audio.ctx;
     const p = this.current;
     if (!ctx || !p) return;
-    // After a suspend (tab hidden), don't try to catch up on missed steps.
-    if (p.nextTime < ctx.currentTime - 0.2) p.nextTime = ctx.currentTime + 0.05;
     const stepDur = 60 / p.song.bpm / 4;
+    // After a suspend (tab hidden), don't try to catch up on missed steps.
+    if (p.nextTime < ctx.currentTime - 0.2) {
+      p.nextTime = ctx.currentTime + 0.05;
+      p.origin = p.nextTime - p.step * stepDur;
+    }
     while (p.nextTime < ctx.currentTime + LOOKAHEAD) {
       this.scheduleStep(p, p.step, p.nextTime, stepDur);
       p.step++;

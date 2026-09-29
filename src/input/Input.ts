@@ -5,6 +5,8 @@ export interface Vec2 {
   y: number;
 }
 
+export type PressListener = (x: number, y: number, timeMs: number) => void;
+
 /**
  * Game input for a shmup:
  * - Relative drag: the ship follows the finger's *movement*, not its position, so the
@@ -22,6 +24,7 @@ export class Input {
   private readonly keyboard = new Keyboard();
   private readonly tapListeners = new Set<() => void>();
   private readonly releaseListeners = new Set<() => void>();
+  private readonly pressListeners = new Set<PressListener>();
   private pointerId: number | null = null;
   private lastX = 0;
   private lastY = 0;
@@ -50,6 +53,15 @@ export class Input {
   /** Fires once per press of a key (by `KeyboardEvent.code`). */
   onKey(code: string, listener: () => void): void {
     this.keyboard.onPress(code, listener);
+  }
+
+  /**
+   * Fires on every pointer press (any finger) with its surface position in CSS pixels and
+   * the event time (performance.now() time base). Runs before tap listeners.
+   */
+  onPress(listener: PressListener): () => void {
+    this.pressListeners.add(listener);
+    return () => this.pressListeners.delete(listener);
   }
 
   /** Fires when the steering pointer is lifted (or cancelled). */
@@ -97,6 +109,13 @@ export class Input {
   private readonly onDown = (e: PointerEvent): void => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.preventDefault();
+    if (this.pressListeners.size > 0) {
+      const rect = this.surface.getBoundingClientRect();
+      const now = performance.now();
+      // Very old engines used epoch timestamps; fall back to "now" for those.
+      const time = Math.abs(e.timeStamp - now) < 1000 ? e.timeStamp : now;
+      this.pressListeners.forEach((fn) => fn(e.clientX - rect.left, e.clientY - rect.top, time));
+    }
     this.emitTap();
     // Additional fingers are ignored while one is already steering.
     if (this.pointerId !== null) return;

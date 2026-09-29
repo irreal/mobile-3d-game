@@ -68,15 +68,26 @@ Each wave is a fixed number of formations, and enemy HP grows each wave. After e
 roll) into the cockpit. The HUD powers on (flicker, scan line, boot text), then the enemy
 squadron drops out of warp right in front of you and you fight it in first person:
 
-- **Swipe over targets to lock on, lift your finger to fire** homing rockets at everything locked
-  (up to 8 locks). A single tap on a target also works.
-- Heavies need several locks: swipe over them repeatedly.
-- **Focus:** while your finger is down, time slows to a crawl so you can line up locks. The Focus
-  meter drains while slowed and refills while your finger is up; when it's empty, time runs normally.
-- **Overcharge:** fire a volley with all 8 locks and the rockets turn gold and blast everything
-  within a few meters of each hit (targets and orbs). Splash kills count toward the chain.
-- Kills from the same volley **chain**: the 2nd kill scores ×2, the 3rd ×3, and so on.
-- Enemies fire glowing plasma orbs at the cockpit. Lock and shoot them down before they hit you.
+The fight is a **rhythm game locked to the cockpit music** (146 BPM):
+
+- Targets get notes on an 8th-note grid. An **approach ring** closes onto each target over two
+  beats; **tap the target the moment the ring lines up**. The bar at the bottom scrolls the
+  upcoming notes toward a hit line, and the crosshair pulses on every beat.
+- Timing is judged against what you *hear* (the audio clock, corrected for output latency) using
+  the touch event's own timestamp: **PERFECT** within ±70 ms, **GREAT** ±130 ms, **GOOD** ±200 ms.
+  Tapping a target far too early is a MISS, so spamming doesn't work.
+- Every hit fires a rocket that lands on the next 8th note after a short flight. Impact sounds are
+  scheduled on the music clock, so explosions hit on the beat. Hits play chord tones of the current
+  bar and climb the arpeggio as your combo grows.
+- Grunts take 1 hit, weavers 2, heavies 4 (fast runs of notes on the same target). Rhythms get
+  denser with each strike and again in the final round.
+- **Pink orbs** are incoming fire: they are notes too, flying in to arrive on their beat. Tap them
+  in time or they hit the cockpit.
+- **Miss a note** and the target dodges and shoots an orb back at you, and your combo resets.
+- **Combo:** ×1.5 score from 8 hits in a row; at 16 you enter **Overdrive** (gold rockets, ×2).
+  The section-clear bonus includes your max combo.
+- The music keeps playing while paused; on resume the chart moves back by whole bars so it
+  stays on the beat. `COCKPIT.inputOffsetMs` in `constants.ts` can compensate for touch latency.
 - The squadron attacks in 3 rounds. When a round is almost cleared (or after a while), the next
   round of **reinforcements** warps in, and the last round brings the heavies.
 - Clear all rounds before the 45-second timer runs out for a bonus (more for time left). If time
@@ -116,8 +127,8 @@ squadron drops out of warp right in front of you and you fight it in first perso
   `CockpitInterior.ts`, which gives each named part a material and places it at the pilot's eye.
 - **Post-processing** (`src/core/PostFx.ts`): an HDR render target with MSAA, bloom
   (`UnrealBloomPass` at half resolution), and a custom final shader with zoom blur (camera fly-in/out),
-  chromatic aberration (hits, big explosions), screen-space shockwave ripples, a cool desaturated
-  tint during Focus, vignette and film grain, then tone mapping.
+  chromatic aberration (hits, big explosions), screen-space shockwave ripples, vignette and film
+  grain, then tone mapping.
 - **Effects:** soft camera-facing glow sprites (`glow.ts`) for sparks, explosion flashes, enemy
   bullets, orbs and engine glows; chunky debris; expanding shock rings; a procedural nebula sky
   dome (`Nebula.ts`) and round glowing stars.
@@ -148,7 +159,7 @@ src/
     GameLoop.ts            setAnimationLoop wrapper, clamped delta, pauses when hidden
     viewport.ts            Resize/orientation observers, default touch gesture blocking
   input/
-    Input.ts               Relative drag steering, keyboard axis, tap events
+    Input.ts               Relative drag steering, keyboard axis, tap and timestamped press events
     Keyboard.ts            Held-key tracking for desktop
   game/
     ShooterScene.ts        Game states (title/playing/game over), weapons, collisions, scoring
@@ -165,17 +176,17 @@ src/
     models.ts              GLB ship loading (with procedural fallbacks), power-up models
     CockpitInterior.ts     3D cockpit interior for the first-person view
     CameraDirector.ts      Camera pose: top-down ↔ cockpit fly-in/out transition, shake
-    CockpitSection.ts      First-person strike: squadron, orbs, lock-on painting, homing rockets
+    CockpitSection.ts      First-person strike: beat-synced chart, notes, orbs, rockets, combo
     WarpField.ts           Speed-line streaks shown in first person
   audio/
     AudioEngine.ts         Web Audio graph (music/sfx buses, echo, filter), synth voices, unlock
-    Music.ts               Lookahead step sequencer: drums, bass, arp, pads, lead
+    Music.ts               Lookahead step sequencer (drums, bass, arp, pads, lead) + beat clock
     songs.ts               Song data (chords, patterns, melodies)
     Sfx.ts                 Synthesized sound effects
     GameAudio.ts           Bundles engine, music and sfx
   ui/
     Hud.ts                 Score, high score, wave, lives, laser/rocket levels, messages, FPS meter
-    CockpitOverlay.ts      Canopy frame, crosshair, lock reticles, timer, Focus meter, callouts
+    CockpitOverlay.ts      Canopy frame, beat pulse, approach rings, beat lane, combo, callouts
     PauseMenu.ts           Pause button and pause menu
     Tutorial.ts            Tutorial cards and their show-count / opt-out storage
 ```
