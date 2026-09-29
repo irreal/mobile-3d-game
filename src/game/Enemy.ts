@@ -165,13 +165,10 @@ export class Enemy {
     const obj = this.model.object;
     obj.position.set(this.x, this.y, 0);
 
-    if (this.kind === 'grunt') {
-      obj.rotation.z += dt * 1.5;
-      obj.rotation.x = Math.sin(this.age * 2 + this.phase) * 0.3;
-    } else {
-      const vx = dt > 0 ? (this.x - this.prevX) / dt : 0;
-      obj.rotation.y = MathUtils.damp(obj.rotation.y, MathUtils.clamp(vx * 0.15, -0.7, 0.7), 8, dt);
-    }
+    // Bank into turns (enemies face down the screen, so the roll sign is flipped).
+    const vx = dt > 0 ? (this.x - this.prevX) / dt : 0;
+    obj.rotation.y = MathUtils.damp(obj.rotation.y, MathUtils.clamp(-vx * 0.2, -0.8, 0.8), 8, dt);
+    if (this.kind === 'grunt') obj.rotation.x = Math.sin(this.age * 2 + this.phase) * 0.15;
 
     if (this.flashTimer > 0) {
       this.flashTimer -= dt;

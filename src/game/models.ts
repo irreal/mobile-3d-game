@@ -12,14 +12,129 @@ import {
   SphereGeometry,
   TorusGeometry,
   AdditiveBlending,
+  SRGBColorSpace,
+  TextureLoader,
 } from 'three';
-import type { BufferGeometry, Material, MeshStandardMaterialParameters } from 'three';
+import type { BufferGeometry, Material, MeshStandardMaterialParameters, Texture ,
+  Box3} from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { createGlowMaterial, glowGeometry } from './glow.ts';
 
 /**
- * Procedural placeholder models. Everything faces +y ("up the screen") on the z = 0 plane,
- * viewed from +z. Geometries are shared; materials are per-instance where they need to
- * flash on hit.
+ * Ship models come from Quaternius' CC0 "Ultimate Spaceships" pack (public/assets/ships),
+ * with the old procedural models as a fallback if loading fails. Everything faces +y
+ * ("up the screen") on the z = 0 plane, viewed from +z; enemies face -y, toward the player.
+ * Geometries are shared; materials are per-instance where they need to flash on hit.
  */
+
+type ShipId = 'player' | 'grunt' | 'weaver' | 'tank';
+
+interface ShipSource {
+  mesh: string;
+  texture: string;
+  /** Largest extent on the gameplay plane, in world units. */
+  span: number;
+  /** Enemies are turned around to face down the screen. */
+  facesDown: boolean;
+}
+
+const SHIP_SOURCES: Record<ShipId, ShipSource> = {
+  player: { mesh: 'challenger.glb', texture: 'challenger_blue.jpg', span: 2.5, facesDown: false },
+  grunt: { mesh: 'bob.glb', texture: 'bob_red.jpg', span: 2.1, facesDown: true },
+  weaver: { mesh: 'dispatcher.glb', texture: 'dispatcher_red.jpg', span: 2.2, facesDown: true },
+  tank: { mesh: 'pancake.glb', texture: 'pancake_red.jpg', span: 3.6, facesDown: true },
+};
+
+interface ShipAsset {
+  geometry: BufferGeometry;
+  texture: Texture;
+  /** Local y of the ship's tail, where engine glows go. */
+  tailY: number;
+}
+
+const shipAssets = new Map<ShipId, ShipAsset>();
+
+/** Loads all ship models; resolves even if some fail (those fall back to procedural models). */
+export async function loadShipModels(): Promise<void> {
+  const base = `${import.meta.env.BASE_URL}assets/ships/`;
+  const gltfLoader = new GLTFLoader();
+  const textureLoader = new TextureLoader();
+  const entries = Object.entries(SHIP_SOURCES) as [ShipId, ShipSource][];
+  await Promise.all(
+    entries.map(async ([id, source]) => {
+      try {
+        const [gltf, texture] = await Promise.all([
+          gltfLoader.loadAsync(base + source.mesh),
+          textureLoader.loadAsync(base + source.texture),
+        ]);
+        let geometry: BufferGeometry | null = null;
+        gltf.scene.updateMatrixWorld(true);
+        gltf.scene.traverse((obj) => {
+          if (!geometry && obj instanceof Mesh) geometry = (obj.geometry as BufferGeometry).clone().applyMatrix4(obj.matrixWorld);
+        });
+        if (!geometry) throw new Error(`${source.mesh} has no mesh`);
+        shipAssets.set(id, { ...normalizeShip(geometry, source), texture: prepareTexture(texture) });
+      } catch (error) {
+        console.warn(`Ship model "${id}" failed to load; using the procedural fallback.`, error);
+      }
+    }),
+  );
+}
+
+/** The pack's ships are y-up with the nose along +z; turn them to face +y (or -y) with top +z. */
+function normalizeShip(geometry: BufferGeometry, source: ShipSource): { geometry: BufferGeometry; tailY: number } {
+  geometry.rotateX(Math.PI / 2);
+  geometry.rotateZ(source.facesDown ? 0 : Math.PI);
+  geometry.computeBoundingBox();
+  const box = geometry.boundingBox as Box3;
+  const center = box.getCenter(box.min.clone());
+  geometry.translate(-center.x, -center.y, -center.z);
+  const size = box.getSize(center);
+  const scale = source.span / Math.max(size.x, size.y);
+  geometry.scale(scale, scale, scale);
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  const b = geometry.boundingBox as Box3;
+  return { geometry, tailY: source.facesDown ? b.max.y : b.min.y };
+}
+
+function prepareTexture(texture: Texture): Texture {
+  texture.colorSpace = SRGBColorSpace;
+  // glTF UV convention (the meshes came from OBJ via obj2gltf).
+  texture.flipY = false;
+  texture.anisotropy = 4;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function shipMaterial(asset: ShipAsset): MeshStandardMaterial {
+  return new MeshStandardMaterial({ map: asset.texture, roughness: 0.55, metalness: 0.35, emissive: 0x000000 });
+}
+
+const engineGlowMaterials = {
+  player: createGlowMaterial({ size: 1.3, intensity: 2.2, color: [1, 0.55, 0.2] }),
+  enemy: createGlowMaterial({ size: 0.75, intensity: 1.6, color: [1, 0.25, 0.35] }),
+};
+
+const sharedMaterials = new Set<Material>(Object.values(engineGlowMaterials));
+
+function engineGlow(material: Material, y: number, scale = 1): Mesh {
+  const glow = new Mesh(glowGeometry, material);
+  glow.position.set(0, y, 0);
+  glow.scale.setScalar(scale);
+  glow.renderOrder = 2;
+  return glow;
+}
+
+function texturedEnemy(id: ShipId, glowScale: number): Model | null {
+  const asset = shipAssets.get(id);
+  if (!asset) return null;
+  const object = new Group();
+  const material = shipMaterial(asset);
+  object.add(new Mesh(asset.geometry, material));
+  object.add(engineGlow(engineGlowMaterials.enemy, asset.tailY + 0.1, glowScale));
+  return { object, flashMaterials: [material] };
+}
 
 const geometries = {
   shipBody: new ConeGeometry(0.42, 1.9, 10),
@@ -68,9 +183,31 @@ export interface Model {
 
 export interface PlayerModel extends Model {
   flame: Mesh;
+  /** Local y of the engine exhaust. */
+  tailY: number;
 }
 
 export function createPlayerShip(): PlayerModel {
+  const asset = shipAssets.get('player');
+  if (asset) {
+    const object = new Group();
+    const hull = shipMaterial(asset);
+    object.add(new Mesh(asset.geometry, hull));
+    const flame = mesh(
+      geometries.flame,
+      new MeshBasicMaterial({ color: 0xffb060, transparent: true, opacity: 0.85, blending: AdditiveBlending }),
+      0,
+      asset.tailY - 0.3,
+      0,
+    );
+    flame.rotation.z = Math.PI;
+    object.add(flame, engineGlow(engineGlowMaterials.player, asset.tailY - 0.05));
+    return { object, flashMaterials: [hull], flame, tailY: asset.tailY };
+  }
+  return createProceduralPlayerShip();
+}
+
+function createProceduralPlayerShip(): PlayerModel {
   const object = new Group();
   const hull = standard(0xdfe7ff, { metalness: 0.5, roughness: 0.3 });
   const wing = standard(0x3b7bff);
@@ -94,10 +231,12 @@ export function createPlayerShip(): PlayerModel {
   flame.rotation.z = Math.PI;
   object.add(flame);
 
-  return { object, flashMaterials: [hull, wing, accent], flame };
+  return { object, flashMaterials: [hull, wing, accent], flame, tailY: -1.15 };
 }
 
 export function createGrunt(): Model {
+  const textured = texturedEnemy('grunt', 0.9);
+  if (textured) return textured;
   const object = new Group();
   const dome = standard(0x57e389, { emissive: 0x0b3d1f });
   const ring = standard(0xc04dff, { metalness: 0.6 });
@@ -110,6 +249,8 @@ export function createGrunt(): Model {
 }
 
 export function createWeaver(): Model {
+  const textured = texturedEnemy('weaver', 0.9);
+  if (textured) return textured;
   const object = new Group();
   const body = standard(0xffb443, { emissive: 0x3d2200 });
   const wing = standard(0xff5a36);
@@ -125,6 +266,8 @@ export function createWeaver(): Model {
 }
 
 export function createTank(): Model {
+  const textured = texturedEnemy('tank', 1.6);
+  if (textured) return textured;
   const object = new Group();
   const hull = standard(0x9b5cff, { flatShading: true, emissive: 0x1d0a3d, metalness: 0.4 });
   const metal = standard(0x5b6380, { metalness: 0.7, roughness: 0.3 });
@@ -147,6 +290,6 @@ export function createPowerup(): Model {
 
 export function disposeModel(model: Model): void {
   model.object.traverse((obj) => {
-    if (obj instanceof Mesh) (obj.material as Material).dispose();
+    if (obj instanceof Mesh && !sharedMaterials.has(obj.material as Material)) (obj.material as Material).dispose();
   });
 }

@@ -14,6 +14,10 @@ export class PlayerShip {
     return this.model.object;
   }
 
+  get tailY(): number {
+    return this.model.tailY;
+  }
+
   place(x: number, y: number): void {
     this.x = this.prevX = x;
     this.y = y;
