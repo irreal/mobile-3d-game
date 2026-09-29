@@ -1,11 +1,12 @@
-/** DOM overlay: score, high score, lives, weapon level, center message, and an optional FPS meter. */
+/** DOM overlay: score, high score, lives, laser and rocket levels, center message, and an optional FPS meter. */
 export class Hud {
   private readonly root: HTMLDivElement;
   private readonly score: HTMLDivElement;
   private readonly hiScore: HTMLDivElement;
   private readonly wave: HTMLDivElement;
   private readonly lives: HTMLDivElement;
-  private readonly weapon: HTMLDivElement;
+  private readonly laser: HTMLDivElement;
+  private readonly rocket: HTMLDivElement;
   private readonly message: HTMLDivElement;
   private readonly messageTitle: HTMLDivElement;
   private readonly messageBody: HTMLDivElement;
@@ -13,7 +14,7 @@ export class Hud {
   private renderMute: ((muted: boolean) => void) | null = null;
   private frames = 0;
   private accumulated = 0;
-  private shown = { score: -1, hiScore: -1, lives: -1, weapon: -1, wave: -1 };
+  private shown = { score: -1, hiScore: -1, lives: -1, weapons: '', wave: -1 };
 
   constructor(overlay: HTMLElement) {
     this.root = el('div', 'hud');
@@ -25,8 +26,9 @@ export class Hud {
     center.append(this.hiScore, this.wave);
     const right = el('div', 'hud-right');
     this.lives = el('div', 'hud-lives');
-    this.weapon = el('div', 'hud-weapon');
-    right.append(this.lives, this.weapon);
+    this.laser = el('div', 'hud-weapon laser');
+    this.rocket = el('div', 'hud-weapon rocket');
+    right.append(this.lives, this.laser, this.rocket);
     top.append(this.score, center, right);
 
     this.message = el('div', 'hud-message');
@@ -93,10 +95,12 @@ export class Hud {
     this.lives.textContent = '▲'.repeat(Math.max(0, lives));
   }
 
-  setWeaponLevel(level: number, max: number): void {
-    if (level === this.shown.weapon) return;
-    this.shown.weapon = level;
-    this.weapon.textContent = `PWR ${'■'.repeat(level)}${'□'.repeat(max - level)}`;
+  setWeapons(laser: number, laserMax: number, rocket: number, rocketMax: number): void {
+    const key = `${laser}/${rocket}`;
+    if (key === this.shown.weapons) return;
+    this.shown.weapons = key;
+    this.laser.textContent = `LSR ${'■'.repeat(laser)}${'□'.repeat(laserMax - laser)}`;
+    this.rocket.textContent = `RKT ${'■'.repeat(rocket)}${'□'.repeat(rocketMax - rocket)}`;
   }
 
   showMessage(title: string, body = ''): void {

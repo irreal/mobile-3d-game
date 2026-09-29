@@ -17,32 +17,33 @@ const RULES: readonly FormationRule[] = [
   { formation: 'line', from: 0, weight: 3 },
   { formation: 'snake', from: 8, weight: 2 },
   { formation: 'vee', from: 40, weight: 2 },
-  { formation: 'tank', from: 25, weight: 1 },
 ];
 
 /**
  * Spawns a wave as a fixed number of formations picked over time; spawns get denser and
- * more varied as play goes on. `done` turns true once the wave's last formation is out.
+ * more varied as play goes on. Heavies (which drop power-ups) come at fixed points in each
+ * wave, so upgrades are deterministic. `done` turns true once the wave's last formation is out.
  */
 export class WaveSpawner {
   wave = 0;
   private timer = 1.2;
-  private sinceTank = 0;
   private formationsLeft = 0;
+  private formationIndex = 0;
+  private tankIndices: number[] = [];
 
   reset(): void {
     this.wave = 0;
-    this.sinceTank = 0;
     this.formationsLeft = 0;
   }
 
   startWave(): void {
     this.wave++;
     this.timer = 1.5;
-    this.formationsLeft = Math.min(
-      WAVES.baseFormations + WAVES.formationsPerWave * (this.wave - 1),
-      WAVES.maxFormations,
-    );
+    const total = Math.min(WAVES.baseFormations + WAVES.formationsPerWave * (this.wave - 1), WAVES.maxFormations);
+    this.formationsLeft = total;
+    this.formationIndex = 0;
+    const slots = this.wave >= WAVES.twoTanksFromWave ? WAVES.tankSlots : [WAVES.singleTankSlot];
+    this.tankIndices = slots.map((f) => Math.floor(total * f));
   }
 
   get done(): boolean {
@@ -51,12 +52,11 @@ export class WaveSpawner {
 
   update(dt: number, time: number, difficulty: number, halfWidth: number, spawn: SpawnFn): void {
     if (this.done) return;
-    this.sinceTank += dt;
     this.timer -= dt;
     if (this.timer > 0) return;
     this.formationsLeft--;
 
-    const formation = this.pick(time);
+    const formation = this.tankIndices.includes(this.formationIndex++) ? 'tank' : this.pick(time);
     const span = halfWidth - 1.2;
     this.timer = MathUtils.lerp(2.2, 0.8, difficulty);
 
@@ -82,7 +82,6 @@ export class WaveSpawner {
         break;
       }
       case 'tank': {
-        this.sinceTank = 0;
         const x = MathUtils.randFloat(-span * 0.4, span * 0.4);
         spawn('tank', x, 0, Math.random() * Math.PI * 2);
         spawn('grunt', MathUtils.clamp(x - 3, -span, span), 1.5, 0);
@@ -94,9 +93,7 @@ export class WaveSpawner {
   }
 
   private pick(time: number): Formation {
-    // Guarantee a tank (and its power-up) roughly every 30 s once they're unlocked.
-    if (time > 25 && this.sinceTank > 30) return 'tank';
-    const available = RULES.filter((r) => time >= r.from && !(r.formation === 'tank' && this.sinceTank < 12));
+    const available = RULES.filter((r) => time >= r.from);
     const total = available.reduce((sum, r) => sum + r.weight, 0);
     let roll = Math.random() * total;
     for (const rule of available) {

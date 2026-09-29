@@ -95,7 +95,14 @@ body {
 .hud-weapon {
   font-size: 11px;
   letter-spacing: 0.08em;
-  color: #5dff9e;
+}
+
+.hud-weapon.laser {
+  color: #6ff3ff;
+}
+
+.hud-weapon.rocket {
+  color: #ffa040;
 }
 
 .hud-message {
@@ -186,6 +193,15 @@ body {
     linear-gradient(245deg, rgb(20 30 60 / 92%) 0 9%, transparent 9.2%),
     radial-gradient(ellipse at 50% 45%, transparent 55%, rgb(40 120 200 / 22%) 80%, rgb(5 10 25 / 75%) 100%);
   box-shadow: inset 0 0 0 2px rgb(111 243 255 / 20%);
+}
+
+.cockpit.with-interior .cockpit-frame {
+  background: radial-gradient(ellipse at 50% 45%, transparent 60%, rgb(40 120 200 / 12%) 85%, rgb(5 10 25 / 55%) 100%);
+  box-shadow: none;
+}
+
+.cockpit.with-interior .cockpit-frame::after {
+  display: none;
 }
 
 .cockpit-frame::after {
@@ -912,4 +928,12 @@ body {
     filter: none;
     opacity: 0.2;
   }
+}
+
+.menu-credits {
+  margin-top: 6px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: rgb(200 215 255 / 55%);
+  text-align: center;
 }

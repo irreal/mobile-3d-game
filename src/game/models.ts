@@ -155,6 +155,8 @@ const geometries = {
   hullRing: new TorusGeometry(1.35, 0.1, 6, 28),
 
   powerup: new OctahedronGeometry(0.45, 0),
+  powerupRocket: new CapsuleGeometry(0.2, 0.55, 4, 8),
+  powerupRing: new TorusGeometry(0.42, 0.06, 6, 20),
 
   playerBullet: new CapsuleGeometry(0.09, 0.6, 2, 6),
   enemyBullet: new SphereGeometry(0.27, 12, 8),
@@ -281,11 +283,32 @@ export function createTank(): Model {
   return { object, flashMaterials: [hull, metal] };
 }
 
-export function createPowerup(): Model {
+export type PowerupKind = 'laser' | 'rocket';
+
+export const POWERUP_COLORS: Record<PowerupKind, number> = { laser: 0x6ff3ff, rocket: 0xffa040 };
+
+const powerupGlows: Record<PowerupKind, Material> = {
+  laser: createGlowMaterial({ size: 2.4, intensity: 1, core: 0.15, color: [0.45, 0.95, 1] }),
+  rocket: createGlowMaterial({ size: 2.4, intensity: 1, core: 0.15, color: [1, 0.6, 0.25] }),
+};
+for (const m of Object.values(powerupGlows)) sharedMaterials.add(m);
+
+/** Laser upgrades are cyan gems; rocket upgrades are orange capsules with a tail fin ring. */
+export function createPowerup(kind: PowerupKind): Model {
   const object = new Group();
-  const gem = standard(0x5dff9e, { emissive: 0x1fcf6a, emissiveIntensity: 0.9, metalness: 0.1 });
-  object.add(mesh(geometries.powerup, gem));
-  return { object, flashMaterials: [gem] };
+  const color = POWERUP_COLORS[kind];
+  const body = standard(color, { emissive: color, emissiveIntensity: 0.7, metalness: 0.2 });
+  if (kind === 'laser') {
+    object.add(mesh(geometries.powerup, body));
+  } else {
+    const capsule = mesh(geometries.powerupRocket, body);
+    capsule.rotation.z = 0.5;
+    const ring = mesh(geometries.powerupRing, standard(0xfff1c9, { emissive: 0xffd23d, emissiveIntensity: 0.6 }));
+    ring.rotation.x = Math.PI / 2;
+    object.add(capsule, ring);
+  }
+  object.add(new Mesh(glowGeometry, powerupGlows[kind]));
+  return { object, flashMaterials: [body] };
 }
 
 export function disposeModel(model: Model): void {

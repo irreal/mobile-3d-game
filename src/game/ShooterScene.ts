@@ -20,6 +20,7 @@ import type { Hud } from '../ui/Hud.ts';
 import { PauseMenu } from '../ui/PauseMenu.ts';
 import { TutorialOverlay } from '../ui/Tutorial.ts';
 import { CameraDirector } from './CameraDirector.ts';
+import { CockpitInterior } from './CockpitInterior.ts';
 import { CockpitSection } from './CockpitSection.ts';
 import type { SectionStatus } from './CockpitSection.ts';
 import {
@@ -29,16 +30,19 @@ import {
   ENEMY_BULLET,
   GAME_TITLE,
   HISCORE_STORAGE_KEY,
+  LASER_LEVELS,
   PLAYER,
   POWERUP,
+  ROCKET,
+  ROCKET_LEVELS,
 } from './constants.ts';
 import { Effects } from './Effects.ts';
 import { createGlowMaterial, glowGeometry } from './glow.ts';
 import { Enemy } from './Enemy.ts';
 import type { EnemyContext, EnemyKind } from './Enemy.ts';
 import { InstancedPool } from './InstancedPool.ts';
-import { createPowerup, disposeModel, sharedGeometries } from './models.ts';
-import type { Model } from './models.ts';
+import { createPowerup, disposeModel, POWERUP_COLORS, sharedGeometries } from './models.ts';
+import type { Model, PowerupKind } from './models.ts';
 import { Playfield } from './Playfield.ts';
 import { PlayerShip } from './PlayerShip.ts';
 import { Nebula } from './Nebula.ts';
@@ -63,9 +67,13 @@ export interface GameUi {
 type Phase = 'shmup' | 'waveClear' | 'toCockpit' | 'hudBoot' | 'cockpit' | 'sectionEnd' | 'toShmup';
 
 const WAVE_CLEAR_PAUSE = 1.8;
+/** Camera blend above which the cockpit interior is shown, and the exterior ship hidden. */
+const INTERIOR_FROM_BLEND = 0.85;
+const HIDE_SHIP_FROM_BLEND = 0.97;
 const SECTION_END_PAUSE = 1.6;
 
 interface Powerup {
+  kind: PowerupKind;
   model: Model;
   x: number;
   y: number;
@@ -79,29 +87,9 @@ const ENEMY_COLORS: Record<EnemyKind, readonly number[]> = {
 const PLAYER_COLORS = [0xdfe7ff, 0x3b7bff, 0x6ff3ff, 0xffa040];
 const PLAYER_BULLET_COLOR = new Color(0x7ff6ff).multiplyScalar(1.25);
 
-/** Offsets and angles (degrees) of the player's shots per weapon level. */
-const WEAPON_PATTERNS: readonly (readonly [number, number])[][] = [
-  [],
-  [
-    [-0.3, 0],
-    [0.3, 0],
-  ],
-  [
-    [-0.3, 0],
-    [0.3, 0],
-    [-0.6, 9],
-    [0.6, -9],
-  ],
-  [
-    [0, 0],
-    [-0.35, 0],
-    [0.35, 0],
-    [-0.6, 8],
-    [0.6, -8],
-    [-0.8, 16],
-    [0.8, -16],
-  ],
-];
+const MAX_LASER = LASER_LEVELS.length - 1;
+const MAX_ROCKET = ROCKET_LEVELS.length - 1;
+const ROCKET_COLOR = new Color(0xffd08a).multiplyScalar(1.5);
 
 const GAMEOVER_INPUT_DELAY = 1.2;
 
@@ -124,6 +112,11 @@ export class ShooterScene implements GameScene {
     createGlowMaterial({ size: 1.05, intensity: 1.6, core: 0.4, color: [1, 0.3, 0.55] }),
     400,
   );
+  private readonly rockets = new InstancedPool(
+    sharedGeometries.rocket,
+    new MeshBasicMaterial({ color: ROCKET_COLOR }),
+    60,
+  );
   private readonly enemies: Enemy[] = [];
   private readonly powerups: Powerup[] = [];
   private readonly drag: Vec2 = { x: 0, y: 0 };
@@ -133,6 +126,7 @@ export class ShooterScene implements GameScene {
   private readonly director = new CameraDirector();
   private readonly cockpitFill = new DirectionalLight(0xcfe0ff, 0);
   private readonly warp = new WarpField();
+  private readonly interior = new CockpitInterior();
   private readonly cockpit: CockpitSection;
 
   private state: State = 'title';
@@ -141,8 +135,12 @@ export class ShooterScene implements GameScene {
   private score = 0;
   private hiScore = loadHiScore();
   private lives: number = PLAYER.lives;
-  private weaponLevel = 1;
+  private laserLevel = 1;
+  private rocketLevel = 0;
   private fireTimer = 0;
+  private rocketTimer = 0;
+  /** Power-ups dropped this game; drives the rocket/laser alternation. */
+  private drops = 0;
   private invulnerable = 0;
   private shake = 0;
   private gameOverShown = false;
@@ -216,8 +214,9 @@ export class ShooterScene implements GameScene {
 
     this.scene.add(this.nebula.mesh);
     for (const layer of this.starfield.layers) this.scene.add(layer.points);
-    this.scene.add(this.player.object, this.playerBullets.mesh, this.enemyBullets.mesh);
-    this.scene.add(this.warp.object);
+    this.scene.add(this.player.object, this.playerBullets.mesh, this.enemyBullets.mesh, this.rockets.mesh);
+    this.scene.add(this.warp.object, this.interior.object);
+    cockpitOverlay.setInterior(this.interior.available);
 
     this.cockpit = new CockpitSection(this.scene, this.effects, cockpitOverlay, audio.sfx, {
       addScore: (points) => {
@@ -297,12 +296,16 @@ export class ShooterScene implements GameScene {
     this.starfield.update(dt, playing ? MathUtils.lerp(14, 30, blend) : 5);
     this.warp.update(dt, blend, this.player.x, this.player.y, 45);
     this.playerBullets.sync();
+    this.rockets.sync();
     this.enemyBullets.sync();
     this.shake = Math.max(0, this.shake - realDt * 1.5);
     this.director.update(realDt, this.camera, this.playfield.cameraDistance, this.player.x, this.player.y, this.shake);
     this.nebula.update(dt, this.camera, playing ? MathUtils.lerp(14, 30, blend) : 5);
     this.updateFx(realDt);
-    this.cockpitOverlay.setOpacity(this.cockpitHudOpacity(blend));
+    const hudOpacity = this.cockpitHudOpacity(blend);
+    this.cockpitOverlay.setOpacity(hudOpacity);
+    this.interior.update(this.director.eye, blend > INTERIOR_FROM_BLEND, hudOpacity);
+    if (this.interior.available && blend > HIDE_SHIP_FROM_BLEND) this.player.object.visible = false;
     this.cockpitOverlay.setLetterbox(this.director.letterbox);
     this.cockpitOverlay.update(realDt);
     if (this.messageTimer > 0) {
@@ -502,8 +505,10 @@ export class ShooterScene implements GameScene {
     this.clearWorld();
     this.cockpit.dispose();
     this.warp.dispose();
+    this.interior.dispose();
     this.starfield.dispose();
     this.playerBullets.dispose();
+    this.rockets.dispose();
     this.enemyBullets.dispose();
     this.effects.dispose();
     this.nebula.dispose();
@@ -538,8 +543,11 @@ export class ShooterScene implements GameScene {
     this.time = 0;
     this.score = 0;
     this.lives = PLAYER.lives;
-    this.weaponLevel = 1;
+    this.laserLevel = 1;
+    this.rocketLevel = 0;
     this.fireTimer = 0;
+    this.rocketTimer = 0;
+    this.drops = 0;
     this.invulnerable = 1;
     this.spawner.reset();
     this.director.reset();
@@ -583,6 +591,7 @@ export class ShooterScene implements GameScene {
     for (const p of this.powerups) this.removePowerupObject(p);
     this.powerups.length = 0;
     this.playerBullets.clear();
+    this.rockets.clear();
     this.enemyBullets.clear();
     this.effects.clear();
   }
@@ -618,16 +627,30 @@ export class ShooterScene implements GameScene {
     // Auto-fire: mobile players need both thumbs free for steering.
     this.fireTimer -= dt;
     while (this.fireTimer <= 0) {
-      this.fireTimer += PLAYER.fireInterval;
-      this.fire();
+      this.fireTimer += LASER_LEVELS[this.laserLevel]!.interval;
+      this.fireLasers();
+    }
+    if (this.rocketLevel > 0) {
+      this.rocketTimer -= dt;
+      while (this.rocketTimer <= 0) {
+        this.rocketTimer += ROCKET_LEVELS[this.rocketLevel]!.interval;
+        this.fireRockets();
+      }
     }
   }
 
-  private fire(): void {
+  private fireRockets(): void {
+    this.audio.sfx.rocket();
+    for (const dx of ROCKET_LEVELS[this.rocketLevel]!.offsets) {
+      const r = this.rockets.spawn(this.player.x + dx, this.player.y + 0.2, dx * 2, ROCKET.launchSpeed, ROCKET.radius);
+      if (r) r.scale = 1.1;
+    }
+  }
+
+  private fireLasers(): void {
     this.audio.sfx.shot();
-    const pattern = WEAPON_PATTERNS[this.weaponLevel]!;
     const y = this.player.y + 0.9;
-    for (const [dx, deg] of pattern) {
+    for (const [dx, deg] of LASER_LEVELS[this.laserLevel]!.shots) {
       const a = MathUtils.degToRad(90 + deg);
       const b = this.playerBullets.spawn(
         this.player.x + dx,
@@ -664,7 +687,6 @@ export class ShooterScene implements GameScene {
       this.gameOver();
       return;
     }
-    this.weaponLevel = Math.max(1, this.weaponLevel - 1);
     this.invulnerable = PLAYER.invulnerableTime;
   }
 
@@ -705,10 +727,55 @@ export class ShooterScene implements GameScene {
   private updateBullets(dt: number): void {
     const pf = this.playfield;
     this.playerBullets.update(dt, (b) => !pf.isOutside(b.x, b.y, 1));
+    this.updateRockets(dt);
     this.enemyBullets.update(dt, (b) => {
       b.scale = 1 + Math.sin(b.age * 18) * 0.15;
       return !pf.isOutside(b.x, b.y, 1);
     });
+  }
+
+  /** Rockets accelerate up the screen; homing ones curve toward the nearest enemy ahead. */
+  private updateRockets(dt: number): void {
+    const pf = this.playfield;
+    const homing = ROCKET_LEVELS[this.rocketLevel]!.homing;
+    const steer = 1 - Math.exp(-ROCKET.steer * dt);
+    this.rockets.update(dt, (r) => {
+      let speed = Math.hypot(r.vx, r.vy);
+      speed = Math.min(ROCKET.maxSpeed, speed + ROCKET.acceleration * dt);
+      let dirX = r.vx / (speed || 1);
+      let dirY = r.vy / (speed || 1);
+      const target = homing && r.age > 0.12 ? this.nearestEnemy(r.x, r.y) : null;
+      if (target) {
+        const dx = target.x - r.x;
+        const dy = target.y - r.y;
+        const len = Math.hypot(dx, dy) || 1;
+        dirX += (dx / len - dirX) * steer;
+        dirY += (dy / len - dirY) * steer;
+      } else {
+        dirX += (0 - dirX) * steer * 0.5;
+        dirY += (1 - dirY) * steer * 0.5;
+      }
+      const len = Math.hypot(dirX, dirY) || 1;
+      r.vx = (dirX / len) * speed;
+      r.vy = (dirY / len) * speed;
+      r.rotation = Math.atan2(r.vy, r.vx) - Math.PI / 2;
+      this.effects.trail(r.x - dirX * 0.4, r.y - dirY * 0.4, 0, r.age < 0.1 ? 0xffffff : 0xffa040, 0.3, 0.45);
+      return !pf.isOutside(r.x, r.y, 2);
+    });
+  }
+
+  private nearestEnemy(x: number, y: number): Enemy | null {
+    let best: Enemy | null = null;
+    let bestDist = Infinity;
+    for (const e of this.enemies) {
+      if (e.y < y - 1 || e.y > this.playfield.top + 0.5) continue;
+      const d = (e.x - x) ** 2 + (e.y - y) ** 2;
+      if (d < bestDist) {
+        bestDist = d;
+        best = e;
+      }
+    }
+    return best;
   }
 
   private updatePowerups(dt: number): void {
@@ -743,6 +810,15 @@ export class ShooterScene implements GameScene {
       }
     }
 
+    // Rockets vs enemies.
+    for (let i = this.rockets.count - 1; i >= 0; i--) {
+      const r = this.rockets.items[i]!;
+      const j = this.enemies.findIndex((e) => circlesOverlap(r.x, r.y, r.radius, e.x, e.y, e.radius));
+      if (j < 0) continue;
+      this.rockets.remove(i);
+      this.rocketImpact(r.x, r.y, j);
+    }
+
     // Enemy bullets vs player.
     for (let i = this.enemyBullets.count - 1; i >= 0; i--) {
       const b = this.enemyBullets.items[i]!;
@@ -768,9 +844,9 @@ export class ShooterScene implements GameScene {
       const p = this.powerups[i]!;
       if (!circlesOverlap(p.x, p.y, 0.45, px, py, PLAYER.pickupRadius)) continue;
       this.audio.sfx.powerup();
-      if (this.weaponLevel < PLAYER.maxWeaponLevel) this.weaponLevel++;
-      else this.score += POWERUP.maxedScore;
-      this.effects.explode(p.x, p.y, [0x5dff9e, 0xffffff], 16, 6, 0.4);
+      this.applyPowerup(p.kind);
+      this.effects.explode(p.x, p.y, [POWERUP_COLORS[p.kind], 0xffffff], 16, 6, 0.4);
+      this.effects.ring(p.x, p.y, 0.2, POWERUP_COLORS[p.kind], 3.5, 0.4);
       navigator.vibrate?.(20);
       this.removePowerupObject(p);
       this.powerups.splice(i, 1);
@@ -788,8 +864,48 @@ export class ShooterScene implements GameScene {
       this.blast(tmpVec.set(e.x, e.y, 0), 1);
     }
     this.audio.sfx.explosion(big ? 'big' : 'small');
-    if (big || Math.random() < POWERUP.dropChance) this.spawnPowerup(e.x, e.y);
+    if (big) this.spawnPowerup(e.x, e.y);
     this.removeEnemyAt(index);
+  }
+
+  private rocketImpact(x: number, y: number, hitIndex: number): void {
+    const splash = ROCKET_LEVELS[this.rocketLevel]!.splash;
+    this.effects.explode(x, y, [0xffa040, 0xffe14d, 0xffffff], splash > 0 ? 18 : 10, splash > 0 ? 9 : 6, 0.35);
+    if (splash > 0) this.effects.ring(x, y, 0.3, 0xffa040, splash * 2, 0.3);
+    const target = this.enemies[hitIndex]!;
+    const victims = new Set<Enemy>([target]);
+    if (splash > 0) {
+      for (const e of this.enemies) if (circlesOverlap(x, y, splash, e.x, e.y, e.radius)) victims.add(e);
+    }
+    for (const e of victims) {
+      const index = this.enemies.indexOf(e);
+      if (index < 0) continue;
+      if (e.hit(e === target ? ROCKET.damage : ROCKET.splashDamage)) this.killEnemy(index);
+      else this.audio.sfx.hit();
+    }
+  }
+
+  /** Deterministic drops: alternate rocket/laser upgrades, skipping a weapon that's maxed. */
+  private nextPowerupKind(): PowerupKind {
+    const preferred: PowerupKind = this.drops++ % 2 === 0 ? 'rocket' : 'laser';
+    if (preferred === 'rocket' && this.rocketLevel >= MAX_ROCKET) return 'laser';
+    if (preferred === 'laser' && this.laserLevel >= MAX_LASER) return 'rocket';
+    return preferred;
+  }
+
+  private applyPowerup(kind: PowerupKind): void {
+    if (kind === 'laser' && this.laserLevel < MAX_LASER) {
+      this.laserLevel++;
+      this.flashMessage('LASER UP', `Level ${this.laserLevel}/${MAX_LASER}`, 1.1);
+    } else if (kind === 'rocket' && this.rocketLevel < MAX_ROCKET) {
+      this.rocketLevel++;
+      const extra = ROCKET_LEVELS[this.rocketLevel]!;
+      const note = this.rocketLevel === 1 ? 'Rockets online' : extra.splash > 0 ? 'Splash damage' : extra.homing ? 'Homing' : '';
+      this.flashMessage('ROCKETS UP', `Level ${this.rocketLevel}/${MAX_ROCKET}${note ? ` · ${note}` : ''}`, 1.1);
+    } else {
+      this.score += POWERUP.maxedScore;
+      this.flashMessage('MAXED', `+${POWERUP.maxedScore}`, 0.9);
+    }
   }
 
   private removeEnemyAt(index: number): void {
@@ -805,10 +921,11 @@ export class ShooterScene implements GameScene {
   }
 
   private spawnPowerup(x: number, y: number): void {
-    const model = createPowerup();
+    const kind = this.nextPowerupKind();
+    const model = createPowerup(kind);
     model.object.position.set(x, y, 0);
     this.scene.add(model.object);
-    this.powerups.push({ model, x, y });
+    this.powerups.push({ kind, model, x, y });
   }
 
   private removePowerupObject(p: Powerup): void {
@@ -856,7 +973,7 @@ export class ShooterScene implements GameScene {
     this.hud.setScore(this.score);
     this.hud.setHiScore(Math.max(this.hiScore, this.score));
     this.hud.setLives(this.state === 'title' ? PLAYER.lives : this.lives);
-    this.hud.setWeaponLevel(this.weaponLevel, PLAYER.maxWeaponLevel);
+    this.hud.setWeapons(this.laserLevel, MAX_LASER, this.rocketLevel, MAX_ROCKET);
   }
 }
 

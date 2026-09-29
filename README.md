@@ -43,14 +43,22 @@ won't work over plain-HTTP LAN; use the deployed GitHub Pages site to test those
 - **Touch:** drag anywhere to steer. The ship follows your finger's movement rather than jumping to
   where you touch, so keep your thumb below the ship where it doesn't block the view.
 - **Desktop:** WASD / arrow keys, or drag with the mouse. Space / Enter / click starts a game.
-- Your ship fires automatically. You have 3 lives. After a hit you blink (invulnerable) briefly,
-  enemy bullets on screen are cleared, and you lose one weapon level.
+- Your ship fires automatically. You have 3 lives. After a hit you blink (invulnerable) briefly
+  and enemy bullets on screen are cleared. Weapon levels are kept.
 - Your hitbox is only the small core of the ship; bullets grazing the wings don't count.
-- Green gems power up your weapon (3 levels). Big purple aliens always drop one; others sometimes do.
-- Enemies:
-  - **Saucer** (green): drifts down, fires aimed shots.
-  - **Dart** (orange): comes in snaking lines, fires straight down.
-  - **Heavy** (purple): parks near the top, fires 5-way spreads, takes many hits.
+- **Two weapons, upgraded separately** (levels shown top-right as `LSR` and `RKT`):
+  - **Lasers** (levels 1–5): fast bolts, 1 damage each; more and wider bolts, then faster fire.
+  - **Rockets** (levels 0–4): slow salvos, 6 damage each. Level 1 unlocks them, 2 fires two,
+    3 adds homing, 4 fires three with splash damage.
+- **Power-ups are deterministic:** only heavies drop them, and every heavy drops exactly one.
+  Heavies come at fixed points in each wave (one per wave in waves 1–2, then two). Drops
+  alternate rocket (orange capsule) and laser (cyan gem), starting with rockets, and skip a
+  weapon that's already maxed. With both maxed, a pickup is worth bonus points. Tuning lives in
+  `LASER_LEVELS`, `ROCKET_LEVELS`, `ROCKET` and `WAVES.tankSlots` in `constants.ts`.
+- Enemies (a red faction):
+  - **Grunt:** drifts down, fires aimed shots.
+  - **Weaver:** comes in snaking lines, fires straight down.
+  - **Heavy:** big saucer; parks near the top, fires 5-way spreads, takes many hits, drops a power-up.
 - Difficulty (spawn rate, bullet speed, fire rate, formations) ramps up over about 2.5 minutes.
 
 ### Cockpit strikes (between waves)
@@ -73,6 +81,8 @@ squadron drops out of warp right in front of you and you fight it in first perso
   round of **reinforcements** warps in, and the last round brings the heavies.
 - Clear all rounds before the 45-second timer runs out for a bonus (more for time left). If time
   runs out, they escape.
+- The first-person view is an actual cockpit interior (dashboard, canopy glass and struts) that
+  the camera flies into; its dashboard lights power on with the HUD.
 - The camera then flies back out and the next, harder wave starts. Squadrons grow and gain heavies
   in later waves.
 - The high score is stored in `localStorage`. Add `?fps` to the URL to show an FPS meter
@@ -100,6 +110,10 @@ squadron drops out of warp right in front of you and you fight it in first perso
   sources were converted to GLB (`obj2gltf` + `gltf-transform weld`) with textures downscaled to
   512–1024 px JPEG. `loadShipModels()` in `models.ts` loads them at startup and bakes orientation
   and size into the geometry; if loading fails, the old procedural models are used.
+- **Cockpit interior:** "Space ship cockpit" by Ville Seppanen (Osmic) from
+  [OpenGameArt](https://opengameart.org/content/space-ship-cockpit), CC-BY 3.0 (attribution
+  required; credited in the pause menu, license in `public/assets/cockpit/`). Loaded as OBJ by
+  `CockpitInterior.ts`, which gives each named part a material and places it at the pilot's eye.
 - **Post-processing** (`src/core/PostFx.ts`): an HDR render target with MSAA, bloom
   (`UnrealBloomPass` at half resolution), and a custom final shader with zoom blur (camera fly-in/out),
   chromatic aberration (hits, big explosions), screen-space shockwave ripples, a cool desaturated
@@ -148,7 +162,8 @@ src/
     glow.ts                Camera-facing additive glow sprite shader
     Nebula.ts              Procedural nebula sky dome
     Starfield.ts           Parallax scrolling stars
-    models.ts              GLB ship loading (with procedural fallbacks), power-up model
+    models.ts              GLB ship loading (with procedural fallbacks), power-up models
+    CockpitInterior.ts     3D cockpit interior for the first-person view
     CameraDirector.ts      Camera pose: top-down ↔ cockpit fly-in/out transition, shake
     CockpitSection.ts      First-person strike: squadron, orbs, lock-on painting, homing rockets
     WarpField.ts           Speed-line streaks shown in first person
@@ -159,7 +174,7 @@ src/
     Sfx.ts                 Synthesized sound effects
     GameAudio.ts           Bundles engine, music and sfx
   ui/
-    Hud.ts                 Score, high score, wave, lives, weapon level, messages, FPS meter
+    Hud.ts                 Score, high score, wave, lives, laser/rocket levels, messages, FPS meter
     CockpitOverlay.ts      Canopy frame, crosshair, lock reticles, timer, Focus meter, callouts
     PauseMenu.ts           Pause button and pause menu
     Tutorial.ts            Tutorial cards and their show-count / opt-out storage

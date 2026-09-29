@@ -19,10 +19,47 @@ export const PLAYER = {
   pickupRadius: 1.1,
   keyboardSpeed: 14,
   dragSensitivity: 1.3,
-  fireInterval: 0.12,
   bulletSpeed: 30,
   invulnerableTime: 2,
-  maxWeaponLevel: 3,
+};
+
+/**
+ * Laser levels (index = level, 1-based): seconds between volleys and the shots per volley as
+ * [x offset, angle in degrees]. Lasers do 1 damage per bolt.
+ */
+export const LASER_LEVELS: readonly { interval: number; shots: readonly (readonly [number, number])[] }[] = [
+  { interval: 1, shots: [] },
+  { interval: 0.12, shots: [[-0.3, 0], [0.3, 0]] },
+  { interval: 0.12, shots: [[0, 0], [-0.4, 0], [0.4, 0]] },
+  { interval: 0.11, shots: [[0, 0], [-0.4, 0], [0.4, 0], [-0.65, 9], [0.65, -9]] },
+  { interval: 0.1, shots: [[-0.2, 0], [0.2, 0], [-0.5, 0], [0.5, 0], [-0.7, 8], [0.7, -8]] },
+  {
+    interval: 0.09,
+    shots: [[0, 0], [-0.3, 0], [0.3, 0], [-0.6, 0], [0.6, 0], [-0.75, 10], [0.75, -10], [-0.85, 20], [0.85, -20]],
+  },
+];
+
+/**
+ * Rocket levels (0 = no rockets): seconds between salvos, launch x offsets, whether rockets
+ * home in on the nearest enemy, and splash radius (0 = none).
+ */
+export const ROCKET_LEVELS: readonly { interval: number; offsets: readonly number[]; homing: boolean; splash: number }[] = [
+  { interval: 1, offsets: [], homing: false, splash: 0 },
+  { interval: 0.85, offsets: [0], homing: false, splash: 0 },
+  { interval: 0.8, offsets: [-0.7, 0.7], homing: false, splash: 0 },
+  { interval: 0.65, offsets: [-0.7, 0.7], homing: true, splash: 0 },
+  { interval: 0.55, offsets: [-0.8, 0, 0.8], homing: true, splash: 2 },
+];
+
+export const ROCKET = {
+  damage: 6,
+  splashDamage: 3,
+  launchSpeed: 6,
+  maxSpeed: 26,
+  acceleration: 45,
+  /** Turn rate toward the target for homing rockets (higher = tighter). */
+  steer: 5,
+  radius: 0.3,
 };
 
 export const ENEMY_BULLET = {
@@ -34,10 +71,9 @@ export const ENEMY_BULLET = {
 /** Seconds of play until difficulty ramps to its maximum. */
 export const DIFFICULTY_RAMP_TIME = 150;
 
+/** Power-ups only come from heavies (tanks), alternating rocket/laser, skipping maxed weapons. */
 export const POWERUP = {
   fallSpeed: 2.5,
-  /** Drop chance for enemies that don't always drop one. */
-  dropChance: 0.03,
   maxedScore: 500,
 };
 
@@ -50,6 +86,13 @@ export const WAVES = {
   maxFormations: 18,
   /** Enemy HP grows by this fraction of base HP each wave. */
   hpGrowthPerWave: 0.15,
+  /**
+   * Heavies come on a fixed schedule: at these fractions of the wave's formations.
+   * Waves before `twoTanksFromWave` get only the first one.
+   */
+  tankSlots: [0.35, 0.75],
+  singleTankSlot: 0.55,
+  twoTanksFromWave: 3,
 };
 
 export const COCKPIT = {
