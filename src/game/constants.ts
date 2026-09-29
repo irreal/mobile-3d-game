@@ -49,7 +49,7 @@ export const WAVES = {
   formationsPerWave: 2,
   maxFormations: 18,
   /** Enemy HP grows by this fraction of base HP each wave. */
-  hpGrowthPerWave: 0.2,
+  hpGrowthPerWave: 0.15,
 };
 
 export const COCKPIT = {
@@ -60,7 +60,7 @@ export const COCKPIT = {
   /** Seconds of HUD power-on animation before the fight starts. */
   bootDuration: 1.8,
   /** Section ends (remaining enemies flee) after this many seconds. */
-  timeLimit: 24,
+  timeLimit: 26,
   maxLocks: 8,
   /** Minimum seconds between two locks on the same target while swiping. */
   relockDelay: 0.2,

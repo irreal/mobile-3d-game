@@ -45,6 +45,7 @@ const geometries = {
   enemyBullet: new SphereGeometry(0.27, 12, 8),
   particle: new BoxGeometry(0.2, 0.2, 0.2),
   rocket: new ConeGeometry(0.14, 0.7, 6),
+  warpStreak: new CylinderGeometry(0.02, 0.35, 1, 8, 1, true),
 } satisfies Record<string, BufferGeometry>;
 
 export const sharedGeometries = geometries;

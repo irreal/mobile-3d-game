@@ -34,6 +34,9 @@ interface Fighter extends Lockable {
   phase: number;
   fireTimer: number;
   flash: number;
+  /** Speed streak shown while dropping out of warp. */
+  streak: Mesh | null;
+  warpedIn: boolean;
 }
 
 interface Orb extends Lockable {
@@ -77,6 +80,11 @@ export interface CockpitCallbacks {
 const COCKPIT_SCORE: Record<EnemyKind, number> = { grunt: 200, weaver: 250, tank: 1200 };
 const FIGHTER_HP: Record<EnemyKind, number> = { grunt: 1, weaver: 2, tank: 6 };
 const FIGHTER_SCALE = 1.4;
+/** Seconds a fighter takes to drop out of warp into its hover spot. */
+const WARP_IN_TIME = 0.8;
+/** How far ahead fighters start their warp exit. */
+const WARP_IN_DISTANCE = 80;
+const WARP_FLASH_COLORS = [0x9fe8ff, 0xffffff, 0x6ff3ff];
 const ORB_RADIUS = 0.32;
 const ORB_COLORS = [0xff4f8b, 0xffffff];
 const EXPLOSION_COLORS: Record<EnemyKind, readonly number[]> = {
@@ -108,6 +116,13 @@ export class CockpitSection {
     depthWrite: false,
   });
   private readonly rocketMaterial = new MeshBasicMaterial({ color: 0xfff1c9 });
+  private readonly streakMaterial = new MeshBasicMaterial({
+    color: 0x9fe8ff,
+    transparent: true,
+    opacity: 0.85,
+    blending: AdditiveBlending,
+    depthWrite: false,
+  });
 
   private anchor = new Vector3();
   private wave = 1;
@@ -163,8 +178,9 @@ export class CockpitSection {
         shipY + depth,
         MathUtils.randFloatSpread(2 * Math.max(rangeZ, 0.5)) + 0.6,
       );
-      const start = hover.clone().add(tmp.set(MathUtils.randFloatSpread(30), 70, MathUtils.randFloatSpread(20)));
-      this.spawnFighter(kind, start, hover, i * 0.22);
+      // Straight down the line of sight, so the warp exit reads as coming from the vanishing point.
+      const start = hover.clone().add(tmp.set(0, WARP_IN_DISTANCE, 0));
+      this.spawnFighter(kind, start, hover, 0.15 + i * 0.16);
     });
   }
 
@@ -234,6 +250,7 @@ export class CockpitSection {
     this.clear();
     this.orbMaterial.dispose();
     this.rocketMaterial.dispose();
+    this.streakMaterial.dispose();
   }
 
   // --- Fighters and orbs -------------------------------------------------------------
@@ -264,15 +281,18 @@ export class CockpitSection {
       phase: Math.random() * Math.PI * 2,
       fireTimer: MathUtils.randFloat(2.5, 4.5),
       flash: 0,
+      streak: null,
+      warpedIn: false,
     });
   }
 
   private updateFighters(dt: number, frame: CockpitFrame): void {
     for (let i = this.fighters.length - 1; i >= 0; i--) {
       const f = this.fighters[i]!;
-      if (this.time < f.delay) continue;
+      // Nobody shows up until the HUD has finished booting (the section is "active").
+      if (this.activeTime < f.delay) continue;
+      if (f.age === 0) this.beginWarpIn(f);
       f.age += dt;
-      f.model.object.visible = true;
 
       if (this.fleeing) {
         f.position.y += (20 + f.age) * dt;
@@ -283,11 +303,14 @@ export class CockpitSection {
           continue;
         }
       } else {
-        const arrive = Math.min(1, f.age / 1.8);
-        const eased = 1 - (1 - arrive) ** 3;
+        const arrive = Math.min(1, f.age / WARP_IN_TIME);
+        // Very steep ease-out: huge speed at first, then an abrupt stop — a "drop out of warp".
+        const eased = 1 - (1 - arrive) ** 5;
+        const settle = MathUtils.smoothstep(f.age, WARP_IN_TIME, WARP_IN_TIME + 1);
         const t = f.age * (f.kind === 'weaver' ? 1.6 : 0.9) + f.phase;
         tmp.set(Math.sin(t) * 1.6, Math.sin(t * 0.7) * 1.2, Math.cos(t) * 1.0);
-        f.position.lerpVectors(f.start, f.hover, eased).addScaledVector(tmp, eased);
+        f.position.lerpVectors(f.start, f.hover, eased).addScaledVector(tmp, settle);
+        this.updateWarpIn(f, arrive);
 
         if (frame.active && arrive >= 1) {
           f.fireTimer -= dt;
@@ -308,6 +331,37 @@ export class CockpitSection {
         f.model.flashMaterials.forEach((m, j) => m.emissive.setHex(on ? 0xffffff : f.baseEmissive[j]!));
       }
     }
+  }
+
+  private beginWarpIn(f: Fighter): void {
+    f.model.object.visible = true;
+    f.streak = new Mesh(sharedGeometries.warpStreak, this.streakMaterial);
+    this.scene.add(f.streak);
+  }
+
+  /** Stretches the fighter and its streak along the flight path while it decelerates. */
+  private updateWarpIn(f: Fighter, arrive: number): void {
+    const speed = (1 - arrive) ** 4;
+    // Models are rotated so local z is the world y axis (the line of sight).
+    f.model.object.scale.set(FIGHTER_SCALE, FIGHTER_SCALE, FIGHTER_SCALE * (1 + speed * 10));
+
+    if (!f.warpedIn && arrive > 0.55) {
+      f.warpedIn = true;
+      const p = f.position;
+      this.effects.explode(p.x, p.y, WARP_FLASH_COLORS, 16, 7, 0.4, p.z);
+      this.sfx.warpIn();
+    }
+
+    if (!f.streak) return;
+    const length = speed * 45 + (1 - arrive) * 4;
+    if (arrive >= 1 || length < 0.05) {
+      this.removeMesh(f.streak);
+      f.streak = null;
+      return;
+    }
+    f.streak.position.set(f.position.x, f.position.y + length / 2, f.position.z);
+    const width = FIGHTER_SCALE * (0.6 + speed);
+    f.streak.scale.set(width, length, width);
   }
 
   private fireOrbs(f: Fighter, eye: Vector3): void {
@@ -370,7 +424,7 @@ export class CockpitSection {
   // --- Locking and rockets -------------------------------------------------------------
 
   private *lockables(): Generator<Lockable> {
-    for (const f of this.fighters) if (f.alive && f.age > 0.6) yield f;
+    for (const f of this.fighters) if (f.alive && f.warpedIn) yield f;
     for (const o of this.orbs) if (o.alive) yield o;
   }
 
@@ -532,6 +586,7 @@ export class CockpitSection {
   }
 
   private removeFighterModel(f: Fighter): void {
+    if (f.streak) this.removeMesh(f.streak);
     this.scene.remove(f.model.object);
     disposeModel(f.model);
   }

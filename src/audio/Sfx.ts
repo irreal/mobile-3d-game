@@ -8,6 +8,7 @@ const THROTTLE: Record<string, number> = {
   explosion: 0.03,
   rocket: 0.035,
   trailPop: 0.05,
+  warpIn: 0.07,
 };
 
 /** Synthesized sound effects. */
@@ -195,6 +196,14 @@ export class Sfx {
     if (this.throttled('rocket')) return;
     this.a.noise({ duration: 0.35, gain: 0.25, filter: { type: 'bandpass', freq: 600, to: 3000, q: 2 } });
     this.a.tone({ type: 'sawtooth', freq: 180, to: 90, duration: 0.25, gain: 0.08 });
+  }
+
+  /** A fighter dropping out of warp: descending zap plus a soft thump. */
+  warpIn(): void {
+    if (this.throttled('warpIn')) return;
+    this.a.tone({ type: 'sawtooth', freq: 2400, to: 180, duration: 0.28, gain: 0.05, filter: { type: 'lowpass', freq: 5000 } });
+    this.a.noise({ duration: 0.25, gain: 0.18, filter: { type: 'highpass', freq: 3000, to: 600 } });
+    this.a.tone({ freq: 120, to: 50, duration: 0.3, gain: 0.25 });
   }
 
   orbFire(): void {

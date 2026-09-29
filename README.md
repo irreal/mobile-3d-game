@@ -57,8 +57,8 @@ won't work over plain-HTTP LAN; use the deployed GitHub Pages site to test those
 
 Each wave is a fixed number of formations, and enemy HP grows each wave. Once the last enemy is
 gone, the camera slowly swoops down behind the ship (with cinematic letterbox bars and a barrel
-roll) into the cockpit. The HUD powers on (flicker, scan line, boot text), then you fight a
-squadron ahead of you in first person:
+roll) into the cockpit. The HUD powers on (flicker, scan line, boot text), then the enemy
+squadron drops out of warp right in front of you and you fight it in first person:
 
 - **Swipe over targets to lock on, lift your finger to fire** homing rockets at everything locked
   (up to 8 locks). A single tap on a target also works.

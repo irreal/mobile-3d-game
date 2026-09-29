@@ -16,11 +16,11 @@ interface EnemyStats {
 
 export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
   /** Saucer that drifts down and fires single aimed shots. */
-  grunt: { hp: 6, radius: 0.8, score: 100, speed: 3.2, fireInterval: [1.8, 3.4], create: createGrunt },
+  grunt: { hp: 5, radius: 0.8, score: 100, speed: 3.2, fireInterval: [1.8, 3.4], create: createGrunt },
   /** Fast dart that snakes side to side and fires straight down. */
-  weaver: { hp: 10, radius: 0.75, score: 150, speed: 4.4, fireInterval: [1.4, 2.4], create: createWeaver },
+  weaver: { hp: 8, radius: 0.75, score: 150, speed: 4.4, fireInterval: [1.4, 2.4], create: createWeaver },
   /** Slow heavy that parks near the top and fires aimed 5-way spreads. Always drops a power-up. */
-  tank: { hp: 90, radius: 1.35, score: 600, speed: 2.2, fireInterval: [1.5, 2.1], create: createTank },
+  tank: { hp: 70, radius: 1.35, score: 600, speed: 2.2, fireInterval: [1.5, 2.1], create: createTank },
 };
 
 export interface EnemyContext {
