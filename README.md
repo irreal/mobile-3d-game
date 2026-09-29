@@ -55,8 +55,10 @@ won't work over plain-HTTP LAN; use the deployed GitHub Pages site to test those
 
 ### Cockpit strikes (between waves)
 
-Each wave is a fixed number of formations. Once the last enemy is gone, the camera swoops down
-behind the ship into the cockpit for a first-person fight against a squadron ahead of you:
+Each wave is a fixed number of formations, and enemy HP grows each wave. Once the last enemy is
+gone, the camera slowly swoops down behind the ship (with cinematic letterbox bars and a barrel
+roll) into the cockpit. The HUD powers on (flicker, scan line, boot text), then you fight a
+squadron ahead of you in first person:
 
 - **Swipe over targets to lock on, lift your finger to fire** homing rockets at everything locked
   (up to 8 locks). A single tap on a target also works.
@@ -69,6 +71,14 @@ behind the ship into the cockpit for a first-person fight against a squadron ahe
   in later waves.
 - The high score is stored in `localStorage`. Add `?fps` to the URL to show an FPS meter
   (always on in dev).
+
+## Audio
+
+All music and sound effects are synthesized at runtime with the Web Audio API. There are no audio
+files, so there's nothing to license or download. There are two original tracks: *Nova Drive*
+(shooter) and *Lock On* (cockpit). The music is muffled during camera transitions and crossfades
+between the two sections. The speaker button (bottom-right) mutes all sound; the setting is saved.
+Mobile browsers only allow audio after a user gesture, so sound starts with the first tap.
 
 ## Project structure
 
@@ -100,6 +110,12 @@ src/
     CameraDirector.ts      Camera pose: top-down ↔ cockpit fly-in/out transition, shake
     CockpitSection.ts      First-person strike: squadron, orbs, lock-on painting, homing rockets
     WarpField.ts           Speed-line streaks shown in first person
+  audio/
+    AudioEngine.ts         Web Audio graph (music/sfx buses, echo, filter), synth voices, unlock
+    Music.ts               Lookahead step sequencer: drums, bass, arp, pads, lead
+    songs.ts               Song data (chords, patterns, melodies)
+    Sfx.ts                 Synthesized sound effects
+    GameAudio.ts           Bundles engine, music and sfx
   ui/
     Hud.ts                 Score, high score, wave, lives, weapon level, messages, FPS meter
     CockpitOverlay.ts      Canopy frame, crosshair, lock reticles, timer, callouts, hit flash

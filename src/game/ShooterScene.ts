@@ -9,6 +9,8 @@ import {
   Scene,
 } from 'three';
 import type { PerspectiveCamera } from 'three';
+import type { GameAudio } from '../audio/GameAudio.ts';
+import { LOCK_ON, NOVA_DRIVE } from '../audio/songs.ts';
 import type { GameScene } from '../core/Engine.ts';
 import type { Input, Vec2 } from '../input/Input.ts';
 import type { CockpitOverlay } from '../ui/CockpitOverlay.ts';
@@ -18,6 +20,7 @@ import { CockpitSection } from './CockpitSection.ts';
 import type { SectionStatus } from './CockpitSection.ts';
 import {
   COCKPIT,
+  WAVES,
   DIFFICULTY_RAMP_TIME,
   ENEMY_BULLET,
   GAME_TITLE,
@@ -41,10 +44,10 @@ type State = 'title' | 'playing' | 'gameover';
 
 /**
  * Phases while playing:
- * shmup → waveClear (wave done, brief breather) → toCockpit (camera flies in) → cockpit
- * (first-person fight) → sectionEnd (results) → toShmup (camera flies out) → next wave.
+ * shmup → waveClear (wave done, brief breather) → toCockpit (camera flies in) → hudBoot
+ * (cockpit HUD powers on) → cockpit (first-person fight) → sectionEnd (results) → toShmup (camera flies out) → next wave.
  */
-type Phase = 'shmup' | 'waveClear' | 'toCockpit' | 'cockpit' | 'sectionEnd' | 'toShmup';
+type Phase = 'shmup' | 'waveClear' | 'toCockpit' | 'hudBoot' | 'cockpit' | 'sectionEnd' | 'toShmup';
 
 const WAVE_CLEAR_PAUSE = 1.8;
 const SECTION_END_PAUSE = 1.6;
@@ -137,6 +140,7 @@ export class ShooterScene implements GameScene {
     private readonly input: Input,
     private readonly hud: Hud,
     private readonly cockpitOverlay: CockpitOverlay,
+    private readonly audio: GameAudio,
   ) {
     this.scene.background = new Color(0x05060f);
     this.scene.add(new HemisphereLight(0xb8c8ff, 0x1a1030, 1.4));
@@ -154,7 +158,7 @@ export class ShooterScene implements GameScene {
     this.scene.add(this.player.object, this.playerBullets.mesh, this.enemyBullets.mesh, this.effects.particles.mesh);
     this.scene.add(this.warp.object);
 
-    this.cockpit = new CockpitSection(this.scene, this.effects, cockpitOverlay, {
+    this.cockpit = new CockpitSection(this.scene, this.effects, cockpitOverlay, audio.sfx, {
       addScore: (points) => {
         this.score += points;
       },
@@ -169,7 +173,10 @@ export class ShooterScene implements GameScene {
       halfWidth: 0,
       difficulty: 0,
       bulletSpeed: ENEMY_BULLET.speedMin,
-      fire: (x, y, vx, vy) => this.enemyBullets.spawn(x, y, vx, vy, ENEMY_BULLET.radius),
+      fire: (x, y, vx, vy) => {
+        this.enemyBullets.spawn(x, y, vx, vy, ENEMY_BULLET.radius);
+        this.audio.sfx.enemyShot();
+      },
     };
 
     this.unsubscribeTap = input.onTap(this.handleTap);
@@ -216,13 +223,28 @@ export class ShooterScene implements GameScene {
     this.enemyBullets.sync();
     this.shake = Math.max(0, this.shake - dt * 1.5);
     this.director.update(dt, this.camera, this.playfield.cameraDistance, this.player.x, this.player.y, this.shake);
-    this.cockpitOverlay.setOpacity(MathUtils.clamp((blend - 0.6) / 0.4, 0, 1));
+    this.cockpitOverlay.setOpacity(this.cockpitHudOpacity(blend));
+    this.cockpitOverlay.setLetterbox(this.director.letterbox);
     this.cockpitOverlay.update(dt);
     if (this.messageTimer > 0) {
       this.messageTimer -= dt;
       if (this.messageTimer <= 0) this.hud.hideMessage();
     }
     this.updateHud();
+  }
+
+  private cockpitHudOpacity(blend: number): number {
+    if (this.state !== 'playing') return MathUtils.clamp((blend - 0.6) / 0.4, 0, 1);
+    switch (this.phase) {
+      case 'hudBoot':
+      case 'cockpit':
+      case 'sectionEnd':
+        return 1;
+      case 'toShmup':
+        return MathUtils.clamp((blend - 0.7) / 0.3, 0, 1);
+      default:
+        return 0;
+    }
   }
 
   private updatePhase(dt: number): void {
@@ -237,6 +259,7 @@ export class ShooterScene implements GameScene {
         if (this.spawner.done && this.enemies.length === 0) {
           this.setPhase('waveClear');
           this.popEnemyBullets();
+          this.audio.sfx.waveClear();
           this.flashMessage(`WAVE ${this.spawner.wave} CLEAR`, 'Enemy squadron ahead!\nSwitching to cockpit…', 2.2);
         }
         break;
@@ -247,15 +270,19 @@ export class ShooterScene implements GameScene {
         if (this.phaseTime > WAVE_CLEAR_PAUSE) {
           this.setPhase('toCockpit');
           this.director.enterCockpit();
+          this.audio.sfx.flyIn(COCKPIT.enterDuration);
+          this.audio.music.setCutoff(450, COCKPIT.enterDuration * 0.8);
           const pf = this.playfield;
           this.cockpit.start(this.player.x, this.player.y, this.spawner.wave, difficulty, pf.widthPx / pf.heightPx);
         }
         break;
 
       case 'toCockpit':
+      case 'hudBoot':
       case 'cockpit':
         this.input.consumeDrag(this.drag);
-        if (this.phase === 'toCockpit' && this.director.inCockpit) this.setPhase('cockpit');
+        if (this.phase === 'toCockpit' && this.director.inCockpit) this.bootHud();
+        else if (this.phase === 'hudBoot' && this.phaseTime > COCKPIT.bootDuration) this.setPhase('cockpit');
         this.endSectionIfDone(this.updateCockpit(dt));
         break;
 
@@ -265,6 +292,8 @@ export class ShooterScene implements GameScene {
         if (this.phaseTime > SECTION_END_PAUSE) {
           this.setPhase('toShmup');
           this.director.exitCockpit();
+          this.audio.sfx.flyOut(COCKPIT.exitDuration);
+          this.audio.music.setCutoff(500, COCKPIT.exitDuration * 0.5);
         }
         break;
 
@@ -276,6 +305,14 @@ export class ShooterScene implements GameScene {
         }
         break;
     }
+  }
+
+  private bootHud(): void {
+    this.setPhase('hudBoot');
+    this.cockpitOverlay.powerOn(COCKPIT.bootDuration);
+    this.audio.sfx.hudBoot(COCKPIT.bootDuration);
+    this.audio.music.play(LOCK_ON, 0.4);
+    this.audio.music.setCutoff(20000, COCKPIT.bootDuration);
   }
 
   private updateCockpit(dt: number): SectionStatus {
@@ -302,6 +339,7 @@ export class ShooterScene implements GameScene {
       const bonus = COCKPIT.clearBonusPerWave * wave + Math.round(this.cockpit.timeLeft) * COCKPIT.timeBonusPerSecond;
       this.score += bonus;
       this.cockpitOverlay.showCallout(`SQUADRON DESTROYED\n+${bonus.toLocaleString('en-US')}`, SECTION_END_PAUSE);
+      this.audio.sfx.squadronCleared();
     }
   }
 
@@ -309,6 +347,8 @@ export class ShooterScene implements GameScene {
     this.setPhase('shmup');
     this.spawner.startWave();
     this.fireTimer = 0;
+    this.audio.music.play(NOVA_DRIVE, 0.8);
+    this.audio.music.setCutoff(20000, 1.2);
     this.flashMessage(`WAVE ${this.spawner.wave}`, '', 1.4);
   }
 
@@ -351,6 +391,7 @@ export class ShooterScene implements GameScene {
   }
 
   private startGame(): void {
+    this.audio.sfx.start();
     this.clearWorld();
     this.state = 'playing';
     this.stateTime = 0;
@@ -377,6 +418,8 @@ export class ShooterScene implements GameScene {
     this.messageTimer = 0;
     this.cockpit.clear();
     if (this.director.blend > 0) this.director.exitCockpit(1.2);
+    this.audio.music.stop(1.5);
+    this.audio.sfx.gameOver();
     if (this.score > this.hiScore) {
       this.hiScore = this.score;
       saveHiScore(this.hiScore);
@@ -438,6 +481,7 @@ export class ShooterScene implements GameScene {
   }
 
   private fire(): void {
+    this.audio.sfx.shot();
     const pattern = WEAPON_PATTERNS[this.weaponLevel]!;
     const y = this.player.y + 0.9;
     for (const [dx, deg] of pattern) {
@@ -459,6 +503,7 @@ export class ShooterScene implements GameScene {
     this.lives--;
     this.shake = 0.6;
     navigator.vibrate?.(this.lives > 0 ? 80 : 250);
+    this.audio.sfx.playerHit();
     if (this.director.blend > 0) {
       this.cockpitOverlay.hitFlash();
     } else {
@@ -489,7 +534,8 @@ export class ShooterScene implements GameScene {
 
   private readonly spawnEnemy = (kind: EnemyKind, x: number, yOffset: number, phase: number): void => {
     const difficulty = Math.min(this.time / DIFFICULTY_RAMP_TIME, 1);
-    const enemy = new Enemy(kind, x, this.playfield.top + 2 + yOffset, phase, difficulty);
+    const hpScale = 1 + WAVES.hpGrowthPerWave * (this.spawner.wave - 1);
+    const enemy = new Enemy(kind, x, this.playfield.top + 2 + yOffset, phase, difficulty, hpScale);
     this.enemies.push(enemy);
     this.scene.add(enemy.object);
   };
@@ -546,6 +592,7 @@ export class ShooterScene implements GameScene {
         this.playerBullets.remove(i);
         this.effects.explode(b.x, b.y + 0.3, [0x7ff6ff, 0xffffff], 3, 5, 0.25);
         if (e.hit(1)) this.killEnemy(j);
+        else this.audio.sfx.hit();
         break;
       }
     }
@@ -574,6 +621,7 @@ export class ShooterScene implements GameScene {
     for (let i = this.powerups.length - 1; i >= 0; i--) {
       const p = this.powerups[i]!;
       if (!circlesOverlap(p.x, p.y, 0.45, px, py, PLAYER.pickupRadius)) continue;
+      this.audio.sfx.powerup();
       if (this.weaponLevel < PLAYER.maxWeaponLevel) this.weaponLevel++;
       else this.score += POWERUP.maxedScore;
       this.effects.explode(p.x, p.y, [0x5dff9e, 0xffffff], 16, 6, 0.4);
@@ -589,6 +637,7 @@ export class ShooterScene implements GameScene {
     const big = e.kind === 'tank';
     this.effects.explode(e.x, e.y, ENEMY_COLORS[e.kind], big ? 60 : 18, big ? 11 : 8, big ? 0.9 : 0.55);
     if (big) this.shake = Math.max(this.shake, 0.35);
+    this.audio.sfx.explosion(big ? 'big' : 'small');
     if (big || Math.random() < POWERUP.dropChance) this.spawnPowerup(e.x, e.y);
     this.removeEnemyAt(index);
   }

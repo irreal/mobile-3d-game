@@ -21,7 +21,10 @@ export class CockpitOverlay {
   private readonly callout: HTMLDivElement;
   private readonly hint: HTMLDivElement;
   private readonly flash: HTMLDivElement;
+  private readonly letterboxTop: HTMLDivElement;
+  private readonly letterboxBottom: HTMLDivElement;
   private calloutTimer = 0;
+  private bootTimer = 0;
 
   constructor(overlay: HTMLElement) {
     this.root = div('cockpit');
@@ -36,9 +39,46 @@ export class CockpitOverlay {
     this.hint = div('cockpit-hint');
     this.hint.textContent = 'SWIPE OVER TARGETS TO LOCK · RELEASE TO FIRE';
     this.flash = div('cockpit-flash');
-    this.root.append(this.reticleLayer, this.brush, this.lockCount, timer, this.callout, this.hint, this.flash);
+    const boot = div('cockpit-boot');
+    for (const line of BOOT_LINES) {
+      const row = div('cockpit-boot-line');
+      row.textContent = line;
+      boot.append(row);
+    }
+    this.root.append(
+      this.reticleLayer,
+      this.brush,
+      this.lockCount,
+      timer,
+      this.callout,
+      this.hint,
+      boot,
+      div('cockpit-scan'),
+      this.flash,
+    );
+    this.letterboxTop = div('letterbox letterbox-top');
+    this.letterboxBottom = div('letterbox letterbox-bottom');
     // Behind the HUD so score/lives stay readable.
-    overlay.insertBefore(this.root, overlay.querySelector('.hud'));
+    const hud = overlay.querySelector('.hud');
+    overlay.insertBefore(this.root, hud);
+    overlay.insertBefore(this.letterboxTop, hud);
+    overlay.insertBefore(this.letterboxBottom, hud);
+    this.setLetterbox(0);
+  }
+
+  /** Plays the HUD power-on sequence (flicker, scan line, boot text, instruments). */
+  powerOn(seconds: number): void {
+    this.root.classList.remove('booting');
+    void this.root.offsetWidth;
+    this.root.classList.add('booting');
+    this.bootTimer = seconds + 0.2;
+  }
+
+  /** Cinematic bars during camera transitions; 0 hidden, 1 fully in. */
+  setLetterbox(amount: number): void {
+    const hidden = (1 - amount) * 100;
+    this.letterboxTop.style.transform = `translateY(${-hidden}%)`;
+    this.letterboxBottom.style.transform = `translateY(${hidden}%)`;
   }
 
   /** 0 hides everything; 1 is fully shown. */
@@ -105,6 +145,10 @@ export class CockpitOverlay {
   }
 
   update(dt: number): void {
+    if (this.bootTimer > 0) {
+      this.bootTimer -= dt;
+      if (this.bootTimer <= 0) this.root.classList.remove('booting');
+    }
     if (this.calloutTimer > 0) {
       this.calloutTimer -= dt;
       if (this.calloutTimer <= 0) this.callout.classList.remove('pop');
@@ -116,8 +160,18 @@ export class CockpitOverlay {
     this.setBrush(null);
     this.callout.classList.remove('pop');
     this.calloutTimer = 0;
+    this.bootTimer = 0;
+    this.root.classList.remove('booting');
   }
 }
+
+const BOOT_LINES = [
+  'NOVA-7 FLIGHT SYSTEMS',
+  'POWER ········ OK',
+  'SENSORS ······ OK',
+  'TARGETING ···· ONLINE',
+  '▸ WEAPONS FREE',
+];
 
 function div(className: string): HTMLDivElement {
   const node = document.createElement('div');

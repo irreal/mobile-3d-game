@@ -16,11 +16,11 @@ interface EnemyStats {
 
 export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
   /** Saucer that drifts down and fires single aimed shots. */
-  grunt: { hp: 1, radius: 0.8, score: 100, speed: 3.2, fireInterval: [1.8, 3.4], create: createGrunt },
+  grunt: { hp: 6, radius: 0.8, score: 100, speed: 3.2, fireInterval: [1.8, 3.4], create: createGrunt },
   /** Fast dart that snakes side to side and fires straight down. */
-  weaver: { hp: 2, radius: 0.75, score: 150, speed: 4.4, fireInterval: [1.4, 2.4], create: createWeaver },
+  weaver: { hp: 10, radius: 0.75, score: 150, speed: 4.4, fireInterval: [1.4, 2.4], create: createWeaver },
   /** Slow heavy that parks near the top and fires aimed 5-way spreads. Always drops a power-up. */
-  tank: { hp: 30, radius: 1.35, score: 600, speed: 2.2, fireInterval: [1.5, 2.1], create: createTank },
+  tank: { hp: 90, radius: 1.35, score: 600, speed: 2.2, fireInterval: [1.5, 2.1], create: createTank },
 };
 
 export interface EnemyContext {
@@ -59,13 +59,15 @@ export class Enemy {
     y: number,
     private readonly phase: number,
     difficulty: number,
+    /** Multiplier on base HP (grows with each wave). */
+    hpScale = 1,
   ) {
     const stats = ENEMY_STATS[kind];
     this.model = stats.create();
     this.baseEmissive = this.model.flashMaterials.map((m) => m.emissive.getHex());
     this.radius = stats.radius;
     this.score = stats.score;
-    this.hp = stats.hp;
+    this.hp = Math.round(stats.hp * hpScale);
     this.speed = stats.speed * MathUtils.lerp(1, 1.25, difficulty);
     this.x = baseX;
     this.prevX = baseX;

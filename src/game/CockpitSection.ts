@@ -1,5 +1,6 @@
 import { AdditiveBlending, MathUtils, Mesh, MeshBasicMaterial, Vector3 } from 'three';
 import type { PerspectiveCamera, Scene } from 'three';
+import type { Sfx } from '../audio/Sfx.ts';
 import type { CockpitOverlay, LockMarker } from '../ui/CockpitOverlay.ts';
 import { COCKPIT } from './constants.ts';
 import type { Effects } from './Effects.ts';
@@ -74,7 +75,7 @@ export interface CockpitCallbacks {
 }
 
 const COCKPIT_SCORE: Record<EnemyKind, number> = { grunt: 200, weaver: 250, tank: 1200 };
-const FIGHTER_HP: Record<EnemyKind, number> = { grunt: 1, weaver: 1, tank: 4 };
+const FIGHTER_HP: Record<EnemyKind, number> = { grunt: 1, weaver: 2, tank: 6 };
 const FIGHTER_SCALE = 1.4;
 const ORB_RADIUS = 0.32;
 const ORB_COLORS = [0xff4f8b, 0xffffff];
@@ -118,11 +119,13 @@ export class CockpitSection {
   private fleeing = false;
   private totalLocks = 0;
   private running = false;
+  private alarmPlayed = false;
 
   constructor(
     private readonly scene: Scene,
     private readonly effects: Effects,
     private readonly overlay: CockpitOverlay,
+    private readonly sfx: Sfx,
     private readonly callbacks: CockpitCallbacks,
   ) {}
 
@@ -140,6 +143,7 @@ export class CockpitSection {
     this.time = 0;
     this.activeTime = 0;
     this.fleeing = false;
+    this.alarmPlayed = false;
 
     const kinds: EnemyKind[] = [];
     const small = Math.min(5 + wave * 2, 14);
@@ -190,6 +194,10 @@ export class CockpitSection {
     this.time += dt;
     if (frame.active) this.activeTime += dt;
     if (!this.fleeing && this.activeTime >= COCKPIT.timeLimit) this.flee();
+    if (!this.fleeing && !this.alarmPlayed && this.timeLeft < 5) {
+      this.alarmPlayed = true;
+      this.sfx.alarm();
+    }
 
     this.updateFighters(dt, frame);
     if (this.updateOrbs(dt, frame)) {
@@ -305,6 +313,7 @@ export class CockpitSection {
   private fireOrbs(f: Fighter, eye: Vector3): void {
     const speed = COCKPIT.orbSpeed + COCKPIT.orbSpeedPerWave * (this.wave - 1);
     const shots = f.kind === 'tank' ? 3 : 1;
+    this.sfx.orbFire();
     for (let s = 0; s < shots; s++) {
       tmp.copy(eye);
       if (s > 0) tmp.x += (s === 1 ? -1 : 1) * 2.5;
@@ -355,6 +364,7 @@ export class CockpitSection {
     for (const target of this.lockables()) target.locks = 0;
     this.totalLocks = 0;
     this.overlay.showCallout('THEY GOT AWAY', 1.5);
+    this.sfx.escaped();
   }
 
   // --- Locking and rockets -------------------------------------------------------------
@@ -378,6 +388,7 @@ export class CockpitSection {
       target.locks++;
       target.lastLockTime = this.time;
       this.totalLocks++;
+      this.sfx.lock(this.totalLocks, COCKPIT.maxLocks);
       navigator.vibrate?.(8);
     }
   }
@@ -391,6 +402,7 @@ export class CockpitSection {
       const mesh = new Mesh(sharedGeometries.rocket, this.rocketMaterial);
       mesh.position.set(frame.eye.x + this.launchSide * 1.3, frame.eye.y + 0.6, frame.eye.z - 0.6);
       this.scene.add(mesh);
+      this.sfx.rocket();
       this.rockets.push({
         mesh,
         velocity: new Vector3(this.launchSide * 7, 8, MathUtils.randFloat(2, 5)),
@@ -456,6 +468,7 @@ export class CockpitSection {
     if (!fighter) {
       target.alive = false;
       this.effects.explode(p.x, p.y, ORB_COLORS, 10, 5, 0.4, p.z);
+      this.sfx.orbPop();
       this.callbacks.addScore(50);
       const index = this.orbs.findIndex((o) => o === target);
       if (index >= 0) {
@@ -467,6 +480,7 @@ export class CockpitSection {
 
     if (target.hp > 0) {
       fighter.flash = 0.08;
+      this.sfx.hit();
       this.effects.explode(p.x, p.y, [0xffffff, 0xffa040], 8, 5, 0.3, p.z);
       return;
     }
@@ -475,10 +489,14 @@ export class CockpitSection {
     volley.kills++;
     const chain = volley.kills;
     this.callbacks.addScore(COCKPIT_SCORE[fighter.kind] * chain);
-    if (chain >= 2) this.overlay.showCallout(`${chain}× CHAIN`);
+    if (chain >= 2) {
+      this.overlay.showCallout(`${chain}× CHAIN`);
+      this.sfx.chain(chain);
+    }
     const big = fighter.kind === 'tank';
     this.effects.explode(p.x, p.y, EXPLOSION_COLORS[fighter.kind], big ? 70 : 28, big ? 12 : 8, big ? 1 : 0.7, p.z);
     navigator.vibrate?.(big ? 40 : 15);
+    this.sfx.explosion(big ? 'big' : 'small');
     this.removeFighterModel(fighter);
     this.fighters.splice(this.fighters.indexOf(fighter), 1);
   }

@@ -48,13 +48,17 @@ export const WAVES = {
   baseFormations: 7,
   formationsPerWave: 2,
   maxFormations: 18,
+  /** Enemy HP grows by this fraction of base HP each wave. */
+  hpGrowthPerWave: 0.2,
 };
 
 export const COCKPIT = {
   fov: 72,
   /** Seconds for the camera to fly into / out of the cockpit. */
-  enterDuration: 1.8,
-  exitDuration: 1.4,
+  enterDuration: 4.2,
+  exitDuration: 3.2,
+  /** Seconds of HUD power-on animation before the fight starts. */
+  bootDuration: 1.8,
   /** Section ends (remaining enemies flee) after this many seconds. */
   timeLimit: 24,
   maxLocks: 8,

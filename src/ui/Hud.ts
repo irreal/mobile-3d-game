@@ -42,6 +42,22 @@ export class Hud {
     overlay.appendChild(this.root);
   }
 
+  /** Adds a sound on/off toggle button (the only interactive HUD element). */
+  addMuteButton(muted: boolean, toggle: () => boolean): void {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'hud-mute';
+    const render = (m: boolean): void => {
+      button.innerHTML = m ? SPEAKER_OFF : SPEAKER_ON;
+      button.setAttribute('aria-label', m ? 'Unmute sound' : 'Mute sound');
+    };
+    render(muted);
+    // Keep taps on the button from reaching the game (start/steer).
+    button.addEventListener('pointerdown', (e) => e.stopPropagation());
+    button.addEventListener('click', () => render(toggle()));
+    this.root.append(button);
+  }
+
   setScore(score: number): void {
     if (score === this.shown.score) return;
     this.shown.score = score;
@@ -95,6 +111,10 @@ export class Hud {
     }
   }
 }
+
+const SPEAKER_PATH = 'M4 9v6h4l5 4V5L8 9H4z';
+const SPEAKER_ON = `<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="${SPEAKER_PATH}"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+const SPEAKER_OFF = `<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="${SPEAKER_PATH}"/><path d="M16 9l6 6M22 9l-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
 
 function el(tag: 'div', className: string): HTMLDivElement {
   const node = document.createElement(tag);

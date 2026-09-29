@@ -397,3 +397,209 @@ body {
     opacity: 0;
   }
 }
+
+/* --- Mute button --------------------------------------------------------------------- */
+
+.hud-mute {
+  position: absolute;
+  right: calc(env(safe-area-inset-right) + 10px);
+  bottom: calc(env(safe-area-inset-bottom) + 10px);
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 20%);
+  border-radius: 50%;
+  background: rgb(10 14 30 / 55%);
+  color: rgb(232 236 245 / 80%);
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+/* --- Transition letterbox ------------------------------------------------------------ */
+
+.letterbox {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 11%;
+  background: #000;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.letterbox-top {
+  top: 0;
+}
+
+.letterbox-bottom {
+  bottom: 0;
+}
+
+/* --- Cockpit HUD power-on ------------------------------------------------------------ */
+
+.cockpit-boot {
+  position: absolute;
+  left: 12%;
+  top: 30%;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  letter-spacing: 0.08em;
+  opacity: 0;
+}
+
+.cockpit-boot-line:last-child {
+  margin-top: 6px;
+  font-weight: 800;
+  color: #fff;
+}
+
+.cockpit-scan {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, #9fe8ff 20%, #fff 50%, #9fe8ff 80%, transparent);
+  box-shadow: 0 0 18px 6px rgb(111 243 255 / 45%);
+  opacity: 0;
+}
+
+.cockpit.booting .cockpit-frame {
+  animation: boot-flicker 0.9s steps(1, end) both;
+}
+
+.cockpit.booting .cockpit-scan {
+  animation: boot-scan 0.8s 0.25s ease-in both;
+}
+
+.cockpit.booting .cockpit-boot {
+  animation: boot-text 1.8s both;
+}
+
+.cockpit.booting .cockpit-boot-line {
+  animation: boot-line 0.01s steps(1, end) both;
+}
+
+.cockpit.booting .cockpit-boot-line:nth-child(1) {
+  animation-delay: 0.3s;
+}
+
+.cockpit.booting .cockpit-boot-line:nth-child(2) {
+  animation-delay: 0.5s;
+}
+
+.cockpit.booting .cockpit-boot-line:nth-child(3) {
+  animation-delay: 0.65s;
+}
+
+.cockpit.booting .cockpit-boot-line:nth-child(4) {
+  animation-delay: 0.8s;
+}
+
+.cockpit.booting .cockpit-boot-line:nth-child(5) {
+  animation-delay: 1.05s;
+}
+
+.cockpit.booting .cockpit-crosshair {
+  animation: boot-crosshair 0.6s 0.9s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+
+.cockpit.booting .cockpit-timer,
+.cockpit.booting .cockpit-locks {
+  animation: boot-fade 0.3s 1.2s both;
+}
+
+.cockpit.booting .cockpit-timer-fill {
+  animation: boot-fill 0.5s 1.3s ease-out both;
+}
+
+@keyframes boot-flicker {
+  0% {
+    opacity: 0;
+  }
+  8% {
+    opacity: 0.7;
+  }
+  14% {
+    opacity: 0;
+  }
+  28% {
+    opacity: 1;
+  }
+  33% {
+    opacity: 0.25;
+  }
+  45%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes boot-scan {
+  0% {
+    top: 0;
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    top: 100%;
+    opacity: 0;
+  }
+}
+
+@keyframes boot-text {
+  0%,
+  10% {
+    opacity: 0;
+  }
+  15%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes boot-line {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes boot-crosshair {
+  from {
+    opacity: 0;
+    transform: scale(3) rotate(90deg);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes boot-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes boot-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}

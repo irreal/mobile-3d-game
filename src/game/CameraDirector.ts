@@ -10,6 +10,8 @@ const EYE_OFFSET = new Vector3(0, 0.15, 0.62);
 
 const easeInOutCubic = (t: number): number => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 
+const ROLL_AXIS = new Vector3(0, 0, 1);
+const roll = new Quaternion();
 const sway = new Quaternion();
 const swayEuler = new Euler();
 const a = new Vector3();
@@ -35,6 +37,13 @@ export class CameraDirector {
 
   get transitioning(): boolean {
     return this.direction !== 0;
+  }
+
+  /** 0..1 amount for cinematic letterbox bars: peaks mid-transition. */
+  get letterbox(): number {
+    if (this.direction === 0) return 0;
+    const p = this.progress;
+    return Math.min(1, Math.min(p, 1 - p) * 5);
   }
 
   enterCockpit(duration = COCKPIT.enterDuration): void {
@@ -84,6 +93,8 @@ export class CameraDirector {
     this.eye.copy(c);
 
     camera.quaternion.slerpQuaternions(TOP_DOWN_ROTATION, COCKPIT_ROTATION, t);
+    // Barrel-roll flourish mid-flight; zero at both ends so the resting views stay level.
+    camera.quaternion.multiply(roll.setFromAxisAngle(ROLL_AXIS, Math.sin(Math.PI * t) * 0.45));
     // Gentle cockpit sway so first person doesn't feel like a static turret.
     swayEuler.set(Math.sin(this.time * 0.9) * 0.015 * t, 0, Math.sin(this.time * 0.6) * 0.03 * t);
     camera.quaternion.multiply(sway.setFromEuler(swayEuler));
