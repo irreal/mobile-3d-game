@@ -36,7 +36,7 @@ interface Fighter {
   streak: Mesh | null;
 }
 
-/** One enemy in a phrase: it calls on `callBeat`, and must be tapped on `callBeat + 4`. */
+/** One enemy in a phrase: it calls on `callBeat`, and must be tapped on `callBeat + RESPONSE_OFFSET`. */
 interface Note {
   fighter: Fighter;
   callBeat: number;
@@ -54,7 +54,7 @@ interface Note {
   onScreen: boolean;
 }
 
-/** Two bars: the call bar starting at `start`, then the response bar. */
+/** The call bar from `start`, a count-in beat, the response, then a short rest (PHRASE_BEATS in all). */
 interface Phrase {
   start: number;
   notes: Note[];
@@ -121,6 +121,12 @@ const PATTERNS: readonly (readonly string[])[] = [
   ['x.x.x.x.', 'x.xx.x..', 'xx.x.x..', 'x.x.xx..', 'x..xx.x.'],
   ['x.xxx.x.', 'xx.xx.x.', 'x.x.xxx.', 'xxx.x.x.', 'x.xx.xx.'],
 ];
+/** Beats from a call to its reply: the call bar plus one count-in beat. */
+const RESPONSE_OFFSET = 5;
+/** Beats per phrase: call bar, count-in, response bar, then a rest before the next call. */
+const PHRASE_BEATS = 12;
+/** After taking a hit, at least this many beats pass before the next phrase (on a bar line). */
+const HIT_PAUSE_BEATS = 7;
 /** Hits a heavy takes; it stays and joins one call per phrase until destroyed. */
 const HEAVY_HP = 2;
 /** Fallback tempo when there is no music clock (no Web Audio). Matches LOCK_ON. */
@@ -359,7 +365,7 @@ export class CockpitSection {
   private advanceClock(): void {
     const now = this.rawBeat(performance.now());
     const gap = now - this.beat;
-    if (this.resyncPending && gap > 0.5 && !Number.isNaN(this.nextPhrase)) this.shiftChart(Math.ceil(gap / 8) * 8);
+    if (this.resyncPending && gap > 0.5 && !Number.isNaN(this.nextPhrase)) this.shiftChart(Math.ceil(gap / 4) * 4);
     this.resyncPending = false;
     this.beat = now;
   }
@@ -392,9 +398,11 @@ export class CockpitSection {
   /** Plans each phrase a little ahead, so fighters can start their warp exit in time. */
   private planPhrases(): void {
     if (Number.isNaN(this.nextPhrase)) this.nextPhrase = Math.ceil((this.beat + 1.5) / 4) * 4;
+    // After a miss, nothing new warps in until the return fire has landed and been dealt with.
+    if (this.volleys.length > 0 || this.phrases.some((p) => p.notes.some((n) => n.missed))) return;
     while (this.phraseCount < this.totalPhrases && this.beat >= this.nextPhrase - 2) {
       this.planPhrase(this.nextPhrase);
-      this.nextPhrase += 8;
+      this.nextPhrase += PHRASE_BEATS;
     }
   }
 
@@ -429,7 +437,7 @@ export class CockpitSection {
       phrase.notes.push({
         fighter,
         callBeat,
-        beat: callBeat + 4,
+        beat: callBeat + RESPONSE_OFFSET,
         order,
         phrase,
         callSounded: false,
@@ -534,7 +542,7 @@ export class CockpitSection {
   private resolvePhrases(): void {
     for (let i = this.phrases.length - 1; i >= 0; i--) {
       const p = this.phrases[i]!;
-      const end = p.start + 8;
+      const end = p.start + RESPONSE_OFFSET + 4;
       if (this.beat < end) continue;
       if (!p.resolved) {
         p.resolved = true;
@@ -542,8 +550,9 @@ export class CockpitSection {
         const shooters = unique(p.notes.filter((n) => n.missed).map((n) => n.fighter)).filter(standing);
         if (shooters.length > 0) this.fireVolley(shooters, end);
         for (const f of unique(p.notes.map((n) => n.fighter)).filter(standing)) {
-          const callsAgain = this.phrases.some((q) => q !== p && q.notes.some((n) => n.fighter === f));
-          if (!callsAgain) this.leave(f);
+          // Heavies stay for the next call (unless the strike is over or they just shot at you).
+          const staysForNext = f.kind === 'tank' && this.phraseCount < this.totalPhrases && !shooters.includes(f);
+          if (!staysForNext) this.leave(f);
         }
       }
       this.phrases.splice(i, 1);
@@ -721,7 +730,7 @@ export class CockpitSection {
         this.sfx.shieldHit();
         this.overlay.hitFlash();
         this.overlay.showCallout(this.shield > 0 ? 'SHIELD HIT' : 'SHIELD DOWN!', 1.2);
-        this.callbacks.blast(this.eye, 0.3);
+        this.callbacks.blast(tmp.copy(this.eye).add(tmp2.set(0, 4, 0)), 0.3);
       } else {
         this.callbacks.playerHit();
         if (!this.running) return;
@@ -749,7 +758,7 @@ export class CockpitSection {
     for (const f of [...this.fighters]) {
       if (f.alive && f.hp - f.inFlight > 0) this.leave(f);
     }
-    this.nextPhrase = Math.ceil((this.beat + 2) / 4) * 4;
+    this.nextPhrase = Math.ceil((this.beat + HIT_PAUSE_BEATS) / 4) * 4;
   }
 
   // --- Rockets -------------------------------------------------------------------------
@@ -867,7 +876,7 @@ export class CockpitSection {
         n.sr = screen.r;
         // Targets get their numbered circle once their call is done and the reply is near.
         const until = n.beat - this.beat;
-        if (!n.called || this.beat < p.start + 3.5) continue;
+        if (!n.called || this.beat < p.start + 4) continue;
         const isNext = n === next;
         this.markers.push({
           x: screen.x,
@@ -886,10 +895,12 @@ export class CockpitSection {
     this.overlay.setShield(this.shield, COCKPIT.shield);
     this.overlay.setTimer(1 - this.phraseCount / Math.max(1, this.totalPhrases));
 
-    const current = this.phrases.find((p) => this.beat >= p.start && this.beat < p.start + 8);
+    const current = this.phrases.find((p) => this.beat >= p.start && this.beat < p.start + RESPONSE_OFFSET + 4);
     const inPhrase = current ? this.beat - current.start : 0;
     const mode: PhraseMode = !current ? null : inPhrase < 4 ? 'watch' : 'repeat';
-    this.overlay.setPhase(mode, Math.floor(inPhrase % 4));
+    // No pips during the count-in beat between call and response.
+    const pip = inPhrase < 4 ? Math.floor(inPhrase) : Math.floor(inPhrase - RESPONSE_OFFSET);
+    this.overlay.setPhase(mode, pip);
     this.overlay.setHintVisible(frame.active && this.phraseCount <= 2 && this.strike <= 1);
   }
 

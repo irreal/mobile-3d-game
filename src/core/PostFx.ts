@@ -163,11 +163,14 @@ export class PostFx {
 
   /** Brief chromatic-aberration hit, 0..1. */
   kickAberration(amount: number): void {
+    if (!Number.isFinite(amount)) return;
     this.aberrationKick = Math.min(1.5, Math.max(this.aberrationKick, amount));
   }
 
   /** Expanding ripple at screen position (0..1 UV, y up). */
   shockwave(x: number, y: number, strength = 1): void {
+    // A NaN here (e.g. projecting a point at the camera) would turn the whole frame black.
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(strength)) return;
     if (this.shockwaves.length >= MAX_SHOCKWAVES) this.shockwaves.shift();
     this.shockwaves.push({ x, y, age: 0, strength });
   }
