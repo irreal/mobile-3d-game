@@ -1,4 +1,4 @@
-export type NoteStyle = 'strike' | 'heavy' | 'call';
+export type NoteStyle = 'strike' | 'heavy' | 'call' | 'laser';
 export type Grade = 'perfect' | 'great' | 'good' | 'miss' | 'call';
 export type PhraseMode = 'watch' | 'repeat' | null;
 
@@ -13,6 +13,15 @@ export interface NoteMarker {
   /** Order in the sequence, shown inside the circle. */
   label: string;
   /** The next target to tap (others are dimmed). */
+  next: boolean;
+}
+
+/** Guide for a laser swipe: a line through a row of targets, swiped from (x1, y1) to (x2, y2). */
+export interface BeamGuide {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
   next: boolean;
 }
 
@@ -37,6 +46,7 @@ export class CockpitOverlay {
   private readonly pulse: HTMLDivElement;
   private readonly noteLayer: HTMLDivElement;
   private readonly notes: HTMLDivElement[] = [];
+  private readonly beams: HTMLDivElement[] = [];
   private readonly lane: HTMLDivElement;
   private readonly laneItems: HTMLDivElement[] = [];
   private readonly combo: HTMLDivElement;
@@ -147,6 +157,29 @@ export class CockpitOverlay {
 
   setHintVisible(visible: boolean): void {
     this.hint.classList.toggle('visible', visible);
+  }
+
+  /** Swipe guides for laser rows, drawn under the target circles. */
+  setBeams(guides: readonly BeamGuide[]): void {
+    while (this.beams.length < guides.length) {
+      const b = div('cockpit-beam');
+      b.append(div('cockpit-beam-arrow'));
+      this.noteLayer.prepend(b);
+      this.beams.push(b);
+    }
+    this.beams.forEach((b, i) => {
+      const g = guides[i];
+      if (!g) {
+        b.style.display = 'none';
+        return;
+      }
+      b.style.display = '';
+      b.classList.toggle('next', g.next);
+      const dx = g.x2 - g.x1;
+      const dy = g.y2 - g.y1;
+      b.style.width = `${Math.hypot(dx, dy)}px`;
+      b.style.transform = `translate(${g.x1}px, ${g.y1}px) rotate(${Math.atan2(dy, dx)}rad)`;
+    });
   }
 
   /** Target circles with their closing approach rings. */

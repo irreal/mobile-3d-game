@@ -230,6 +230,22 @@ export class Sfx {
     this.a.tone({ type: 'triangle', freq, time, duration: 0.25, gain: 0.07, destination: this.a.echo });
   }
 
+  /** A laser row arriving on its call: a buzzy zap on the note with a quick rising sweep. */
+  laserCall(midi: number, time?: number): void {
+    const freq = 440 * 2 ** ((midi - 69) / 12);
+    this.a.tone({ type: 'sawtooth', freq: freq / 2, to: freq * 2, time, duration: 0.3, gain: 0.12, filter: { type: 'lowpass', freq: 1800, to: 6000 } });
+    this.a.tone({ type: 'square', freq, time, duration: 0.3, gain: 0.08, filter: { type: 'lowpass', freq: 3000, to: 900 } });
+    this.a.tone({ type: 'triangle', freq, time, duration: 0.35, gain: 0.22 });
+    this.a.tone({ type: 'sawtooth', freq, time, duration: 0.2, gain: 0.05, destination: this.a.echo });
+  }
+
+  /** Laser swipe firing. */
+  laserCharge(): void {
+    this.a.tone({ type: 'sawtooth', freq: 1800, to: 300, duration: 0.35, gain: 0.12, filter: { type: 'lowpass', freq: 6000, to: 1500 } });
+    this.a.tone({ type: 'square', freq: 900, to: 220, duration: 0.3, gain: 0.06 });
+    this.a.noise({ duration: 0.3, gain: 0.14, filter: { type: 'bandpass', freq: 3000, to: 800, q: 1.5 } });
+  }
+
   /**
    * "Your turn": a riser from `riseStart` into a bright chime on `time`, marking the switch
    * from the enemies' call to the player's response.

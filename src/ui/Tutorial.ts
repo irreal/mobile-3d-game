@@ -31,7 +31,8 @@ const CONTENT: Record<TutorialId, TutorialContent> = {
     lines: [
       '<b>WATCH:</b> enemies drop out of warp one by one, on the beat. Remember the order and rhythm.',
       '<b>REPEAT:</b> start right as the swoosh ends and tap them back <b>in the same order and rhythm</b>. Numbers show the order; a ring closes on the next one.',
-      'Each hit fires a rocket that explodes on the music. Orange heavies come back until destroyed.',
+      'Each hit fires a rocket that explodes on the music. Big heavies come back until destroyed.',
+      '<b>LASER ROWS:</b> a green line of ships arrives on one beat. On its beat, <b>swipe along the line</b> to cut them all.',
       'Enemies you miss <b>shoot back</b>: first your shield, then your lives. Chain hits for a <b>combo</b>!',
     ],
   },

@@ -59,6 +59,11 @@ won't work over plain-HTTP LAN; use the deployed GitHub Pages site to test those
   - **Grunt:** drifts down, fires aimed shots.
   - **Weaver:** comes in snaking lines, fires straight down.
   - **Heavy:** big saucer; parks near the top, fires 5-way spreads, takes many hits, drops a power-up.
+  - **Swooper** (orange): comes in trains that arc across the screen from one side (or both
+    sides at once, crossing), each firing one aimed shot.
+  - **Diver** (green): drops in, locks on (blinking green), then dashes straight at where you were.
+  - **Sprayer** (purple): parks mid-screen, spins and fires rotating rings of shots, then leaves.
+- Formations unlock over time: lines, snakes, swoops, dives, vees, sprayers with escorts and pincers.
 - Difficulty (spawn rate, bullet speed, fire rate, formations) ramps up over about 2.5 minutes.
 
 ### Cockpit strikes (between waves)
@@ -92,8 +97,12 @@ phrases of three bars (call bar, response bar, then a rest bar):
   and warp away. Each volley costs one of 3 shield pips (refilled every strike); with the shield
   down it costs a life. A hit interrupts the sequence: every ship still on the field flies away,
   and after a pause of about two bars (to get your bearings) a fresh phrase starts on a bar line.
-- **Heavies** (orange, from the second strike) stay on the field and join one call per phrase
-  until they've been hit twice.
+- **Heavies** (from the second strike; purple sprayers join from the third) stay on the field and
+  join one call per phrase until they've been hit twice.
+- **Laser rows** (from the third phrase): a slanted green line of 3 ships (4 from the third strike)
+  warps in together on one call with a zap. On its reply beat, **swipe along the line**; the laser
+  follows your finger and cuts each ship it crosses. The swipe must start on the beat (same timing
+  windows) and cut every ship within a beat, or the rest count as a miss and fire back.
 - Rhythms get denser with each strike and again halfway through; from level 3 the sequence jumps
   around the screen instead of reading left to right. A strike is 6 phrases, +1 per strike.
 - **Combo:** ×1.5 score from 8 hits in a row; at 16 you enter **Overdrive** (gold rockets, ×2).
@@ -114,7 +123,8 @@ phrases of three bars (call bar, response bar, then a rest bar):
   High/Low, Show tutorials again, and Quit to title.
 - **Cockpit test** (pause menu, for testing): buttons 1–5 jump straight into that cockpit strike
   level of the current game (the fly-in plays, then the squadron for that strike).
-- Dying in the cockpit keeps the first-person view for the game-over screen.
+- Dying blows the ship up in a chain of explosions and it stays gone for the game-over screen; in
+  the cockpit the first-person view is kept and the blasts go off in front of the canopy.
 - **Tutorials:** a quick "How to fly" card at the start of each game, and a "Cockpit strike" card the
   first time you enter the cockpit in each game. From the third time a card is shown, it offers
   a *Don't show again* checkbox. Show counts and opt-outs are stored in `localStorage`
@@ -128,7 +138,8 @@ phrases of three bars (call bar, response bar, then a rest bar):
 - **Ships:** the player ship and enemies come from Quaternius'
   [Ultimate Spaceships pack](https://quaternius.com/packs/ultimatespaceships.html) (CC0, public
   domain; license in `public/assets/ships/`). The player flies the blue *Challenger*; the enemy
-  faction flies red ships: *Bob* (grunt), *Dispatcher* (weaver) and *Pancake* (heavy). The OBJ
+  faction flies *Bob* (grunt), *Dispatcher* (weaver) and *Pancake* (heavy) in red, plus *Spitfire*
+  (swooper, orange), *Striker* (diver and laser rows, green) and *Omen* (sprayer, purple). The OBJ
   sources were converted to GLB (`obj2gltf` + `gltf-transform weld`) with textures downscaled to
   512–1024 px JPEG. `loadShipModels()` in `models.ts` loads them at startup and bakes orientation
   and size into the geometry; if loading fails, the old procedural models are used.

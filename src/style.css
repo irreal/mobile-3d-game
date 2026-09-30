@@ -284,6 +284,53 @@ body {
   --note: #ffb443;
 }
 
+.cockpit-note.laser {
+  --note: #57ff9a;
+}
+
+.cockpit-beam {
+  position: absolute;
+  left: 0;
+  top: -3px;
+  height: 6px;
+  transform-origin: 0 50%;
+  border-radius: 3px;
+  background: repeating-linear-gradient(90deg, rgb(87 255 154 / 70%) 0 14px, transparent 14px 24px);
+  opacity: 0.4;
+}
+
+.cockpit-beam.next {
+  opacity: 1;
+  box-shadow: 0 0 12px rgb(87 255 154 / 60%);
+  animation: beam-flow 0.5s linear infinite;
+}
+
+@keyframes beam-flow {
+  from {
+    background-position-x: 0;
+  }
+  to {
+    background-position-x: 24px;
+  }
+}
+
+.cockpit-beam-arrow {
+  position: absolute;
+  right: -14px;
+  top: -7px;
+  border-left: 16px solid #57ff9a;
+  border-top: 10px solid transparent;
+  border-bottom: 10px solid transparent;
+  filter: drop-shadow(0 0 6px #57ff9a);
+}
+
+.cockpit-lane-note.laser {
+  width: 26px;
+  border-radius: 7px;
+  background: #57ff9a;
+  box-shadow: 0 0 8px #57ff9a;
+}
+
 .cockpit-note:not(.next) {
   opacity: 0.45;
 }

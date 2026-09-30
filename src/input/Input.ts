@@ -25,6 +25,7 @@ export class Input {
   private readonly tapListeners = new Set<() => void>();
   private readonly releaseListeners = new Set<() => void>();
   private readonly pressListeners = new Set<PressListener>();
+  private readonly moveListeners = new Set<PressListener>();
   private pointerId: number | null = null;
   private lastX = 0;
   private lastY = 0;
@@ -62,6 +63,12 @@ export class Input {
   onPress(listener: PressListener): () => void {
     this.pressListeners.add(listener);
     return () => this.pressListeners.delete(listener);
+  }
+
+  /** Fires as the steering pointer moves, with its surface position in CSS pixels. */
+  onPointerMove(listener: PressListener): () => void {
+    this.moveListeners.add(listener);
+    return () => this.moveListeners.delete(listener);
   }
 
   /** Fires when the steering pointer is lifted (or cancelled). */
@@ -133,6 +140,7 @@ export class Input {
     this.lastX = e.clientX;
     this.lastY = e.clientY;
     this.updatePointer(e);
+    this.moveListeners.forEach((fn) => fn(this.pointer.x, this.pointer.y, e.timeStamp));
   };
 
   private readonly onUp = (e: PointerEvent): void => {
