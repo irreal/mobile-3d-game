@@ -40,7 +40,7 @@ import {
 import { Effects } from './Effects.ts';
 import { createGlowMaterial, glowGeometry } from './glow.ts';
 import { Enemy, EXPLOSION_COLORS } from './Enemy.ts';
-import { Environment, environmentForWave } from './Environment.ts';
+import { Environment, environmentForWave, upcomingPlanet } from './Environment.ts';
 import type { EnvironmentId } from './Environment.ts';
 import type { EnemyContext, EnemyKind } from './Enemy.ts';
 import { InstancedPool } from './InstancedPool.ts';
@@ -307,7 +307,9 @@ export class ShooterScene implements GameScene {
     this.cockpitFill.intensity = 2.6 * blend;
     const scrollSpeed = playing ? MathUtils.lerp(14, 30, blend) : 5;
     this.starfield.update(dt, scrollSpeed);
-    this.environment.update(dt, this.camera, scrollSpeed);
+    this.environment.setApproach(upcomingPlanet(this.spawner.wave), this.planetApproach());
+    this.environment.update(dt, this.camera, scrollSpeed, blend);
+    if (this.environment.heat > 0) this.shake = Math.max(this.shake, this.environment.heat * 0.7);
     this.starfield.setAtmosphere(this.environment.atmosphere);
     this.nebula.setIntensity(1 - this.environment.atmosphere);
     this.warp.update(dt, blend, this.player.x, this.player.y, 45);
@@ -435,11 +437,19 @@ export class ShooterScene implements GameScene {
     const env = this.environment;
     const from = env.id;
     if (next === from) return;
-    const seconds = COCKPIT.exitDuration + 0.6;
+    const seconds = from === 'space' ? COCKPIT.exitDuration + 2.4 : COCKPIT.exitDuration + 0.6;
     env.transitionTo(next, seconds);
     this.audio.sfx.atmosphere(seconds);
     const title = from === 'space' ? 'ENTERING ATMOSPHERE' : next === 'space' ? 'LEAVING ATMOSPHERE' : 'HYPERJUMP';
     this.flashMessage(title, next === 'space' ? 'Back to deep space' : env.nameOf(next), seconds);
+  }
+
+  /** How close the next planet looms while in space: grows over the pair of waves before it. */
+  private planetApproach(): number {
+    if (this.state === 'title' || this.spawner.wave === 0) return 0.25;
+    const inPair = (this.spawner.wave - 1) % 2;
+    if (this.phase === 'shmup' || this.phase === 'waveClear') return ((inPair + this.spawner.progress) / 2) * 0.7;
+    return 0.75;
   }
 
   private get isStrikeWave(): boolean {

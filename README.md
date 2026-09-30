@@ -68,15 +68,18 @@ won't work over plain-HTTP LAN; use the deployed GitHub Pages site to test those
 
 ### Environments
 
-Every cockpit strike ends by flying into a new world, which lasts for the next two waves: deep
-space (waves 1–2), then the desert planet **Kharan** (3–4), the ocean world **Thalassa** (5–6) and
-the molten world **Vulcan** (7–8), then back to space and around again. Entering or leaving an
-atmosphere plays a rumble with a cloud/heat veil while the camera pulls out of the cockpit.
-Planets are drawn by `Environment.ts`: a sky dome, a procedural heightfield terrain scrolling below the playfield
+Every cockpit strike ends by flying into a new world, which lasts for the next two waves, with a
+stretch of deep space between planets: space (waves 1–2), the desert planet **Kharan** (3–4),
+space (5–6), the ocean world **Thalassa** (7–8), space (9–10), the molten world **Vulcan**
+(11–12), then around again. In space the next planet hangs ahead of you (below in the top-down
+view, ahead in the cockpit) and grows over the two waves. After the strike the ship dives at it
+until it fills the view, burns through the upper atmosphere (heat glow and shake), punches
+through the clouds and levels out over the ground. Leaving, the planet drops away behind you.
+Planets are drawn by `Environment.ts` (and `Planet.ts` for the globe seen from space): a sky dome, a procedural heightfield terrain scrolling below the playfield
 (mesas, islands in a sea, or rock over glowing lava, with fog toward the horizon) and drifting
 clouds; stars and the nebula fade out while inside an atmosphere. Everything is generated in
 shaders, so there are no extra asset downloads. The cockpit test in the pause menu starts in the
-world of that strike (level 2 is the desert).
+world of that strike (level 2 is the desert, 4 the ocean).
 
 ### Cockpit strikes (between waves)
 

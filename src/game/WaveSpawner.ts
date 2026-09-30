@@ -32,6 +32,7 @@ export class WaveSpawner {
   wave = 0;
   private timer = 1.2;
   private formationsLeft = 0;
+  private formationTotal = 0;
   private formationIndex = 0;
   private tankIndices: number[] = [];
 
@@ -45,9 +46,15 @@ export class WaveSpawner {
     this.timer = 1.5;
     const total = Math.min(WAVES.baseFormations + WAVES.formationsPerWave * (this.wave - 1), WAVES.maxFormations);
     this.formationsLeft = total;
+    this.formationTotal = total;
     this.formationIndex = 0;
     const slots = this.wave >= WAVES.twoTanksFromWave ? WAVES.tankSlots : [WAVES.singleTankSlot];
     this.tankIndices = slots.map((f) => Math.floor(total * f));
+  }
+
+  /** 0..1 share of this wave's formations already sent. */
+  get progress(): number {
+    return this.formationTotal > 0 ? 1 - this.formationsLeft / this.formationTotal : 0;
   }
 
   get done(): boolean {

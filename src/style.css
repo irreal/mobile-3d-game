@@ -1297,11 +1297,14 @@ body {
 
 /* Cloud / heat veil while entering or leaving a planet's atmosphere. */
 .env-veil {
-  --veil: 255, 255, 255;
+  --veil: 255 255 255;
+  --cloud: 0;
+  --heat: 0;
   position: absolute;
   inset: 0;
   pointer-events: none;
   opacity: 0;
   background:
-    radial-gradient(ellipse at 50% 55%, rgb(var(--veil) / 55%) 0%, rgb(var(--veil) / 85%) 55%, rgb(var(--veil) / 95%) 100%);
+    radial-gradient(ellipse at 50% 40%, rgb(255 230 160 / calc(var(--heat) * 30%)) 0%, rgb(255 120 40 / calc(var(--heat) * 55%)) 45%, rgb(255 60 20 / calc(var(--heat) * 90%)) 100%),
+    radial-gradient(ellipse at 50% 55%, rgb(var(--veil) / calc(var(--cloud) * 55%)) 0%, rgb(var(--veil) / calc(var(--cloud) * 85%)) 55%, rgb(var(--veil) / calc(var(--cloud) * 95%)) 100%);
 }

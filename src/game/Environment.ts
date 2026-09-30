@@ -13,14 +13,27 @@ import {
   Vector3,
 } from 'three';
 import type { Camera, Texture } from 'three';
+import { Planet } from './Planet.ts';
 
 export type EnvironmentId = 'space' | 'desert' | 'ocean' | 'lava';
 
 /** Environment per pair of waves (a cockpit strike ends each pair); cycles after the last. */
-const ORDER: readonly EnvironmentId[] = ['space', 'desert', 'ocean', 'lava'];
+const ORDER: readonly EnvironmentId[] = ['space', 'desert', 'space', 'ocean', 'space', 'lava'];
+
+const pairOf = (wave: number): number => Math.floor(Math.max(0, wave - 1) / 2);
 
 export function environmentForWave(wave: number): EnvironmentId {
-  return ORDER[Math.floor(Math.max(0, wave - 1) / 2) % ORDER.length]!;
+  return ORDER[pairOf(wave) % ORDER.length]!;
+}
+
+/** The next planet the ship will reach from `wave` on (the current one if already there). */
+export function upcomingPlanet(wave: number): Exclude<EnvironmentId, 'space'> {
+  const pair = pairOf(wave);
+  for (let i = 0; i < ORDER.length; i++) {
+    const id = ORDER[(pair + i) % ORDER.length]!;
+    if (id !== 'space') return id;
+  }
+  return 'desert';
 }
 
 interface Palette {
@@ -74,7 +87,7 @@ const PALETTES: Record<Exclude<EnvironmentId, 'space'>, Palette> = {
     dunes: 1,
     cloud: 0xf3c9a0,
     cloudOpacity: 0.16,
-    veil: '255, 214, 170',
+    veil: '255 214 170',
   },
   ocean: {
     name: 'THALASSA · OCEAN WORLD',
@@ -95,7 +108,7 @@ const PALETTES: Record<Exclude<EnvironmentId, 'space'>, Palette> = {
     dunes: 0,
     cloud: 0xffffff,
     cloudOpacity: 0.42,
-    veil: '240, 248, 255',
+    veil: '240 248 255',
   },
   lava: {
     name: 'VULCAN · MOLTEN WORLD',
@@ -116,7 +129,7 @@ const PALETTES: Record<Exclude<EnvironmentId, 'space'>, Palette> = {
     dunes: 0,
     cloud: 0x3a2622,
     cloudOpacity: 0.5,
-    veil: '255, 120, 50',
+    veil: '255 120 50',
   },
 };
 
@@ -323,6 +336,11 @@ interface Cloud {
   speed: number;
 }
 
+/** After leaving a planet it shrinks away behind the ship over this long. */
+const DEPART_SECONDS = 12;
+/** Planet size at which the ship hits the atmosphere (fills the view). */
+const ENTRY_SIZE = 1.3;
+
 /**
  * Backdrop for each stretch of the game: deep space (the nebula and stars owned by the
  * scene) or a planet flown low over: sky dome, scrolling procedural terrain (optional sea
@@ -333,6 +351,18 @@ export class Environment {
   readonly object = new Group();
   /** 0 in space, 1 fully inside a planet's atmosphere. */
   atmosphere = 0;
+  /** 0..1 re-entry heat (for camera shake). */
+  heat = 0;
+  private readonly world = new Group();
+  private readonly planet: Planet;
+  private planetLook: EnvironmentId | null = null;
+  private planetSize = 0;
+  private planetFade = 1;
+  private entryFrom = 0;
+  private upcoming: Exclude<EnvironmentId, 'space'> = 'desert';
+  private approach = 0;
+  private departed: Exclude<EnvironmentId, 'space'> | null = null;
+  private departTime = Infinity;
   private readonly terrain: Mesh;
   private readonly terrainMaterial: ShaderMaterial;
   private readonly sky: Mesh;
@@ -406,10 +436,12 @@ export class Environment {
       const sprite = new Sprite(this.cloudMaterial);
       this.placeCloud(sprite, MathUtils.randFloat(CLOUD_Y_MIN, CLOUD_Y_MAX));
       this.clouds.push({ sprite, speed: MathUtils.randFloat(0.8, 1.2) });
-      this.object.add(sprite);
+      this.world.add(sprite);
     }
-    this.object.add(this.sky, this.terrain);
-    this.object.visible = false;
+    this.world.add(this.sky, this.terrain);
+    this.world.visible = false;
+    this.planet = new Planet(new Vector3(-0.6, -0.3, 0.75).normalize());
+    this.object.add(this.world, this.planet.object);
 
     this.veil = document.createElement('div');
     this.veil.className = 'env-veil';
@@ -434,6 +466,16 @@ export class Environment {
       this.applyPalette();
     }
     this.atmosphere = id === 'space' ? 0 : 1;
+    this.departed = null;
+    this.departTime = Infinity;
+    this.planetFade = 1;
+    this.planetSize = this.approach;
+  }
+
+  /** In space: which planet lies ahead and how close it is (0 far, 1 about to enter). */
+  setApproach(id: Exclude<EnvironmentId, 'space'>, amount: number): void {
+    this.upcoming = id;
+    this.approach = amount;
   }
 
   /** Blends to `id` over `seconds`. */
@@ -446,6 +488,13 @@ export class Environment {
     if (this.current === 'space' && id !== 'space') {
       this.palette = PALETTES[id];
       this.applyPalette();
+      this.upcoming = id;
+      this.entryFrom = this.planetSize;
+    }
+    if (id === 'space' && this.current !== 'space') {
+      this.departed = this.current;
+      this.departTime = 0;
+      this.planetFade = 0;
     }
   }
 
@@ -454,16 +503,22 @@ export class Environment {
   }
 
   /** `speed` is the scroll speed of the play plane in world units per second. */
-  update(dt: number, camera: Camera, speed: number): void {
+  update(dt: number, camera: Camera, speed: number, cockpitBlend: number): void {
     this.time += dt;
     this.scroll += speed * 0.6 * dt;
     let veil = 0;
+    this.heat = 0;
+    const entering = this.progress < 1 && this.current === 'space' && this.target !== 'space';
     if (this.progress < 1) {
       this.progress = Math.min(1, this.progress + dt / this.duration);
       const p = this.progress;
       veil = Math.sin(Math.PI * p);
       if (this.current === 'space') {
-        this.atmosphere = MathUtils.smoothstep(p, 0.3, 0.75);
+        // Dive at the planet until it fills the view, burn through the upper atmosphere,
+        // punch through the clouds, and level out over the ground.
+        veil = MathUtils.smoothstep(p, 0.35, 0.55) * (1 - MathUtils.smoothstep(p, 0.65, 0.95));
+        this.heat = MathUtils.smoothstep(p, 0.12, 0.35) * (1 - MathUtils.smoothstep(p, 0.45, 0.6));
+        this.atmosphere = MathUtils.smoothstep(p, 0.5, 0.75);
       } else if (this.target === 'space') {
         this.atmosphere = 1 - MathUtils.smoothstep(p, 0.25, 0.7);
       } else {
@@ -477,11 +532,12 @@ export class Environment {
       }
       if (p >= 1) this.current = this.target;
     }
+    this.updatePlanet(dt, camera, cockpitBlend, entering);
 
     const a = this.atmosphere;
-    this.object.visible = a > 0.001;
-    this.updateVeil(veil);
-    if (!this.object.visible) return;
+    this.world.visible = a > 0.001;
+    this.updateVeil(veil, this.heat);
+    if (!this.world.visible) return;
 
     const u = this.terrainMaterial.uniforms;
     u.uScroll!.value = this.scroll;
@@ -496,7 +552,41 @@ export class Environment {
     }
   }
 
+  private updatePlanet(dt: number, camera: Camera, cockpitBlend: number, entering: boolean): void {
+    let look: Exclude<EnvironmentId, 'space'> | null = null;
+    let size = 0;
+    let opacity = 0;
+    if (entering) {
+      const p = this.progress;
+      look = this.target as Exclude<EnvironmentId, 'space'>;
+      size = MathUtils.lerp(this.entryFrom, ENTRY_SIZE, MathUtils.smoothstep(p, 0, 0.5));
+      opacity = 1 - MathUtils.smoothstep(p, 0.5, 0.62);
+      this.planetSize = size;
+    } else if (this.departed && this.departTime < DEPART_SECONDS) {
+      // Climbing out: the planet we left drops away below and behind.
+      this.departTime += dt;
+      const t = this.departTime / DEPART_SECONDS;
+      look = this.departed;
+      size = MathUtils.lerp(1.15, 0.12, 1 - (1 - t) ** 2.5);
+      opacity = MathUtils.smoothstep(this.departTime, this.duration * 0.35, this.duration * 0.65) * (1 - MathUtils.smoothstep(t, 0.75, 1));
+      this.planetSize = 0;
+    } else if (this.target === 'space' && this.progress >= 1) {
+      look = this.upcoming;
+      this.planetFade = Math.min(1, this.planetFade + dt / 3);
+      this.planetSize += (this.approach - this.planetSize) * Math.min(1, dt * 0.8);
+      size = this.planetSize;
+      opacity = this.planetFade;
+    }
+    if (look && look !== this.planetLook) {
+      const p = PALETTES[look];
+      this.planet.setLook({ low: p.low, mid: p.mid, high: p.high, sea: p.sea, seaLevel: p.seaLevel, seaGlow: p.seaGlow, atmosphere: p.skyHorizon });
+      this.planetLook = look;
+    }
+    this.planet.update(dt, camera.position, cockpitBlend, size, look ? opacity : 0);
+  }
+
   dispose(): void {
+    this.planet.dispose();
     this.terrain.geometry.dispose();
     this.terrainMaterial.dispose();
     this.sky.geometry.dispose();
@@ -532,10 +622,13 @@ export class Environment {
     this.cloudOpacity = p.cloudOpacity;
   }
 
-  private updateVeil(amount: number): void {
+  private updateVeil(amount: number, heat: number): void {
     const tint = (this.palette ?? PALETTES.ocean).veil;
-    this.veil.style.opacity = amount > 0.01 ? String(Math.min(1, amount * 1.15)) : '0';
+    const active = amount > 0.01 || heat > 0.01;
+    this.veil.style.opacity = active ? '1' : '0';
     this.veil.style.setProperty('--veil', tint);
+    this.veil.style.setProperty('--cloud', String(Math.min(1, amount * 1.15)));
+    this.veil.style.setProperty('--heat', String(heat));
   }
 
   private placeCloud(sprite: Sprite, y: number): void {
