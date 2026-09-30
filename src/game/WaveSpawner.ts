@@ -52,6 +52,11 @@ export class WaveSpawner {
     this.tankIndices = slots.map((f) => Math.floor(total * f));
   }
 
+  /** Testing: mark the current wave's formations as all sent. */
+  skipWave(): void {
+    this.formationsLeft = 0;
+  }
+
   /** 0..1 share of this wave's formations already sent. */
   get progress(): number {
     return this.formationTotal > 0 ? 1 - this.formationsLeft / this.formationTotal : 0;

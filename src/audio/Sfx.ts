@@ -339,4 +339,25 @@ export class Sfx {
       this.a.tone({ type: 'square', freq: 980, time: t + i * 0.2, duration: 0.1, gain: 0.05 });
     }
   }
+
+  /** Klaxon: the alien base is coming up. */
+  bossAlarm(): void {
+    const t = this.a.now;
+    for (let i = 0; i < 3; i++) {
+      this.a.tone({ type: 'sawtooth', freq: 330, to: 620, time: t + i * 0.7, duration: 0.55, gain: 0.09, filter: { type: 'lowpass', freq: 2400 } });
+    }
+    this.a.tone({ type: 'sine', freq: 55, time: t, duration: 2.2, gain: 0.18, attack: 0.3 });
+  }
+
+  /** Base core shield collapses. */
+  shieldDown(): void {
+    this.a.tone({ type: 'sawtooth', freq: 1400, to: 90, duration: 0.8, gain: 0.1, filter: { type: 'lowpass', freq: 4000, to: 300 } });
+    this.a.noise({ duration: 0.7, gain: 0.25, filter: { type: 'bandpass', freq: 2600, to: 300, q: 1.5 } });
+  }
+
+  /** Fighters take off from the base's hangars. */
+  launch(): void {
+    this.a.noise({ duration: 0.5, gain: 0.14, attack: 0.05, filter: { type: 'bandpass', freq: 400, to: 2400, q: 1.2 } });
+    this.a.tone({ type: 'square', freq: 200, to: 500, duration: 0.3, gain: 0.04, filter: { type: 'lowpass', freq: 1500 } });
+  }
 }

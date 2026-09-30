@@ -112,7 +112,6 @@ const HALO_FRAGMENT = /* glsl */ `
 
 /** Distance from the camera; the planet's apparent size is set by its radius. */
 const DISTANCE = 150;
-const TOP_DOWN_DIR = new Vector3(0.06, 0.3, -1).normalize();
 const COCKPIT_DIR = new Vector3(0.12, 1, -0.22).normalize();
 const dir = new Vector3();
 
@@ -180,16 +179,20 @@ export class Planet {
   }
 
   /** `cockpit` is the camera blend (0 top-down, 1 first person). */
-  update(dt: number, cameraPosition: Vector3, cockpit: number, size: number, opacity: number): void {
+  /**
+   * `screenY` places it in the top-down view: tangent of its angle up the screen from centre
+   * (above ~0.6 it is off the top edge).
+   */
+  update(dt: number, cameraPosition: Vector3, cockpit: number, size: number, screenY: number, opacity: number): void {
     this.object.visible = opacity > 0.001;
     if (!this.object.visible) return;
     this.spin += dt * 0.02;
     this.surface.uniforms.uSpin!.value = this.spin;
     this.surface.uniforms.uOpacity!.value = opacity;
     this.halo.uniforms.uOpacity!.value = opacity;
-    const angle = 0.03 + 0.75 * Math.min(1.3, Math.max(0, size)) ** 1.8;
+    const angle = 0.05 + 0.4 * Math.min(1.7, Math.max(0, size)) ** 1.5;
     const radius = DISTANCE * Math.min(0.9, Math.sin(Math.min(angle, Math.PI / 2)));
-    dir.copy(TOP_DOWN_DIR).lerp(COCKPIT_DIR, cockpit).normalize();
+    dir.set(0.04, screenY, -1).normalize().lerp(COCKPIT_DIR, cockpit).normalize();
     this.object.position.copy(cameraPosition).addScaledVector(dir, DISTANCE);
     this.object.scale.setScalar(radius);
   }

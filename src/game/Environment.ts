@@ -11,6 +11,7 @@ import {
   Sprite,
   SpriteMaterial,
   Vector3,
+  Vector4,
 } from 'three';
 import type { Camera, Texture } from 'three';
 import { Planet } from './Planet.ts';
@@ -174,6 +175,9 @@ const TERRAIN_VERTEX = /* glsl */ `
   uniform float uRidge;
   uniform float uTerrace;
   uniform float uSeaLevel;
+  /** Flattened clearing: terrain-space centre (xy), radius (z), 1 if active (w). */
+  uniform vec4 uClear;
+  uniform float uClearHeight;
   varying float vHeight;
   varying float vSlope;
   varying vec3 vWorld;
@@ -192,7 +196,12 @@ const TERRAIN_VERTEX = /* glsl */ `
     h = mix(h, terraced, uTerrace);
     // A winding valley along the flight path keeps the view down the middle open.
     float valley = smoothstep(0.0, 26.0, abs(p.x - sin(p.y * 0.018) * 14.0));
-    return h * mix(0.6, 1.0, valley);
+    h *= mix(0.6, 1.0, valley);
+    if (uClear.w > 0.0) {
+      float d = length(p - uClear.xy);
+      h = mix(uClearHeight, h, smoothstep(uClear.z * 0.75, uClear.z * 1.25, d));
+    }
+    return h;
   }
 
   void main() {
@@ -339,7 +348,12 @@ interface Cloud {
 /** After leaving a planet it shrinks away behind the ship over this long. */
 const DEPART_SECONDS = 12;
 /** Planet size at which the ship hits the atmosphere (fills the view). */
-const ENTRY_SIZE = 1.3;
+const ENTRY_SIZE = 1.6;
+/** Terrain scrolls at this fraction of the play-plane speed (it's far below). */
+export const TERRAIN_SCROLL_RATE = 0.6;
+/** Top-down screen height of the approaching planet (view-direction tangent): enters from above the top edge. */
+const APPROACH_SCREEN_START = 0.8;
+const APPROACH_SCREEN_END = 0.1;
 
 /**
  * Backdrop for each stretch of the game: deep space (the nebula and stars owned by the
@@ -391,6 +405,8 @@ export class Environment {
         uRidge: { value: 0 },
         uTerrace: { value: 0 },
         uSeaLevel: { value: -1 },
+        uClear: { value: new Vector4() },
+        uClearHeight: { value: 0.3 },
         uSeaGlow: { value: 0 },
         uDunes: { value: 0 },
         uLow: { value: new Color() },
@@ -502,10 +518,29 @@ export class Environment {
     return this.progress < 1;
   }
 
+  /** Terrain scroll so far; a point on the ground at world y has terrain y = y + scrollOffset. */
+  get scrollOffset(): number {
+    return this.scroll;
+  }
+
+  /** Flattens the ground around terrain point (x, y); returns the world z of the flat ground. */
+  setClearing(x: number, y: number, radius: number): number {
+    const p = this.palette;
+    const height = p ? Math.max(0.3, p.seaLevel + 0.08) : 0.3;
+    const u = this.terrainMaterial.uniforms;
+    (u.uClear!.value as Vector4).set(x, y, radius, 1);
+    u.uClearHeight!.value = height;
+    return TERRAIN_Z + height * (p?.amplitude ?? 8);
+  }
+
+  clearClearing(): void {
+    (this.terrainMaterial.uniforms.uClear!.value as Vector4).w = 0;
+  }
+
   /** `speed` is the scroll speed of the play plane in world units per second. */
   update(dt: number, camera: Camera, speed: number, cockpitBlend: number): void {
     this.time += dt;
-    this.scroll += speed * 0.6 * dt;
+    this.scroll += speed * TERRAIN_SCROLL_RATE * dt;
     let veil = 0;
     this.heat = 0;
     const entering = this.progress < 1 && this.current === 'space' && this.target !== 'space';
@@ -556,10 +591,13 @@ export class Environment {
     let look: Exclude<EnvironmentId, 'space'> | null = null;
     let size = 0;
     let opacity = 0;
+    let screenY = APPROACH_SCREEN_END;
     if (entering) {
       const p = this.progress;
       look = this.target as Exclude<EnvironmentId, 'space'>;
-      size = MathUtils.lerp(this.entryFrom, ENTRY_SIZE, MathUtils.smoothstep(p, 0, 0.5));
+      const k = MathUtils.smoothstep(p, 0, 0.5);
+      size = MathUtils.lerp(this.entryFrom, ENTRY_SIZE, k);
+      screenY = MathUtils.lerp(this.approachScreenY(this.entryFrom), 0, k);
       opacity = 1 - MathUtils.smoothstep(p, 0.5, 0.62);
       this.planetSize = size;
     } else if (this.departed && this.departTime < DEPART_SECONDS) {
@@ -567,14 +605,17 @@ export class Environment {
       this.departTime += dt;
       const t = this.departTime / DEPART_SECONDS;
       look = this.departed;
-      size = MathUtils.lerp(1.15, 0.12, 1 - (1 - t) ** 2.5);
-      opacity = MathUtils.smoothstep(this.departTime, this.duration * 0.35, this.duration * 0.65) * (1 - MathUtils.smoothstep(t, 0.75, 1));
+      size = MathUtils.lerp(1.2, 0.35, 1 - (1 - t) ** 2);
+      screenY = MathUtils.lerp(0, -1.6, t ** 1.4);
+      opacity = MathUtils.smoothstep(this.departTime, this.duration * 0.35, this.duration * 0.65) * (1 - MathUtils.smoothstep(t, 0.8, 1));
       this.planetSize = 0;
     } else if (this.target === 'space' && this.progress >= 1) {
+      // Far ahead it drifts slowly down from above the top of the screen, growing as it nears.
       look = this.upcoming;
       this.planetFade = Math.min(1, this.planetFade + dt / 3);
-      this.planetSize += (this.approach - this.planetSize) * Math.min(1, dt * 0.8);
+      this.planetSize += (this.approach - this.planetSize) * Math.min(1, dt * 0.5);
       size = this.planetSize;
+      screenY = this.approachScreenY(size);
       opacity = this.planetFade;
     }
     if (look && look !== this.planetLook) {
@@ -582,7 +623,12 @@ export class Environment {
       this.planet.setLook({ low: p.low, mid: p.mid, high: p.high, sea: p.sea, seaLevel: p.seaLevel, seaGlow: p.seaGlow, atmosphere: p.skyHorizon });
       this.planetLook = look;
     }
-    this.planet.update(dt, camera.position, cockpitBlend, size, look ? opacity : 0);
+    this.planet.update(dt, camera.position, cockpitBlend, size, screenY, look ? opacity : 0);
+  }
+
+  private approachScreenY(size: number): number {
+    const t = Math.min(1, size / 0.72);
+    return MathUtils.lerp(APPROACH_SCREEN_START, APPROACH_SCREEN_END, 1 - (1 - t) ** 1.6);
   }
 
   dispose(): void {

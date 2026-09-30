@@ -11,6 +11,8 @@ export interface PauseMenuActions {
   resetTutorials: () => void;
   /** Testing shortcut: jump to cockpit strike N (1-based). */
   jumpToCockpit: (strike: number) => void;
+  /** Testing shortcut: jump to the alien base fight on planet N (1-based). */
+  jumpToBase: (planet: number) => void;
 }
 
 const TEST_STRIKES = 5;
@@ -59,6 +61,7 @@ export class PauseMenu {
       this.effectsButton,
       this.tutorialButton,
       testRow(actions.jumpToCockpit),
+      baseTestRow(actions.jumpToBase),
       replyDelayRow(),
       menuButton('Quit to title', actions.quit),
       credits(),
@@ -120,6 +123,21 @@ function testRow(jump: (strike: number) => void): HTMLDivElement {
     b.classList.add('small');
     row.append(b);
   }
+  return row;
+}
+
+/** Buttons that jump straight to each planet's alien base fight. */
+function baseTestRow(jump: (planet: number) => void): HTMLDivElement {
+  const row = document.createElement('div');
+  row.className = 'menu-row';
+  const label = document.createElement('span');
+  label.textContent = 'Base test';
+  row.append(label);
+  ['Desert', 'Ocean', 'Lava'].forEach((name, i) => {
+    const b = menuButton(name, () => jump(i + 1));
+    b.classList.add('small');
+    row.append(b);
+  });
   return row;
 }
 

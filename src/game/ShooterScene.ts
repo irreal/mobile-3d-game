@@ -20,6 +20,7 @@ import type { CockpitOverlay } from '../ui/CockpitOverlay.ts';
 import type { Hud } from '../ui/Hud.ts';
 import { PauseMenu } from '../ui/PauseMenu.ts';
 import { TutorialOverlay } from '../ui/Tutorial.ts';
+import { AlienBase, BASE_CLEARING, CORE_OFFSET, HANGAR_OFFSETS, SENTRY_OFFSETS } from './AlienBase.ts';
 import { CameraDirector } from './CameraDirector.ts';
 import { CockpitInterior } from './CockpitInterior.ts';
 import { CockpitSection } from './CockpitSection.ts';
@@ -64,10 +65,26 @@ export interface GameUi {
 
 /**
  * Phases while playing:
- * shmup → waveClear (wave done, brief breather) → toCockpit (camera flies in) → hudBoot
+ * shmup → [bossApproach → boss → bossDown: alien base at the end of a planet] → waveClear (wave done, brief breather) → toCockpit (camera flies in) → hudBoot
  * (cockpit HUD powers on) → cockpit (first-person fight) → sectionEnd (results) → toShmup (camera flies out) → next wave.
  */
-type Phase = 'shmup' | 'waveClear' | 'toCockpit' | 'hudBoot' | 'cockpit' | 'sectionEnd' | 'toShmup';
+type Phase =
+  | 'shmup'
+  | 'bossApproach'
+  | 'boss'
+  | 'bossDown'
+  | 'waveClear'
+  | 'toCockpit'
+  | 'hudBoot'
+  | 'cockpit'
+  | 'sectionEnd'
+  | 'toShmup';
+
+/** Base centre rests at this fraction of the visible top once arrived. */
+const BASE_REST = 0.42;
+/** Within this distance of its resting place the scroll brakes to a stop. */
+const BASE_BRAKE_DISTANCE = 22;
+const BASE_DOWN_TIME = 3.6;
 
 const WAVE_CLEAR_PAUSE = 1.8;
 /** Camera blend above which the cockpit interior is shown, and the exterior ship hidden. */
@@ -159,6 +176,17 @@ export class ShooterScene implements GameScene {
   private deathTime = 0;
   private deathSpread = 1;
   private readonly deathCenter = new Vector3();
+  private base: AlienBase | null = null;
+  /** Terrain-space y of the base (it moves with the ground). */
+  private baseTerrainY = 0;
+  private bossCore: Enemy | null = null;
+  private readonly bossSentries: Enemy[] = [];
+  private bossDefeated = false;
+  private hangarTimer = 0;
+  private hangarLaunches = 0;
+  private bossBursts: number[] = [];
+  /** Scroll speed multiplier: brakes to 0 at the alien base. */
+  private scrollFactor = 1;
   private readonly hud: Hud;
   private readonly cockpitOverlay: CockpitOverlay;
   private readonly pauseMenu: PauseMenu;
@@ -190,6 +218,7 @@ export class ShooterScene implements GameScene {
           this.quitToTitle();
         },
         jumpToCockpit: (strike) => this.jumpToCockpit(strike),
+        jumpToBase: (planet) => this.jumpToBase(planet),
         toggleSound: () => audio.engine.toggleMuted(),
         toggleEffects: () => {
           fx.setQuality(fx.quality === 'high' ? 'low' : 'high');
@@ -293,6 +322,7 @@ export class ShooterScene implements GameScene {
       if (this.state === 'title') this.player.y = this.startY() + Math.sin(this.stateTime * 2) * 0.25;
     }
 
+    this.updateBase(dt);
     this.updateEnemies(dt);
     this.updateBullets(dt);
     this.updatePowerups(dt);
@@ -305,7 +335,7 @@ export class ShooterScene implements GameScene {
     this.effects.update(dt, this.camera);
     const blend = this.director.blend;
     this.cockpitFill.intensity = 2.6 * blend;
-    const scrollSpeed = playing ? MathUtils.lerp(14, 30, blend) : 5;
+    const scrollSpeed = (playing ? MathUtils.lerp(14, 30, blend) : 5) * this.scrollFactor;
     this.starfield.update(dt, scrollSpeed);
     this.environment.setApproach(upcomingPlanet(this.spawner.wave), this.planetApproach());
     this.environment.update(dt, this.camera, scrollSpeed, blend);
@@ -356,7 +386,9 @@ export class ShooterScene implements GameScene {
         this.time += dt;
         this.updatePlayer(dt);
         this.spawner.update(dt, this.time, difficulty, this.playfield.halfWidth, this.spawnEnemy);
-        if (this.spawner.done && this.enemies.length === 0) {
+        if (this.spawner.done && this.enemies.length === 0 && this.isBaseWave && !this.bossDefeated) {
+          this.startBoss();
+        } else if (this.spawner.done && this.enemies.length === 0) {
           this.setPhase('waveClear');
           this.popEnemyBullets();
           this.audio.sfx.waveClear();
@@ -365,7 +397,25 @@ export class ShooterScene implements GameScene {
         }
         break;
 
+      case 'bossApproach':
+      case 'boss':
+        this.time += dt;
+        this.updatePlayer(dt);
+        this.updateBoss(dt, difficulty);
+        break;
+
+      case 'bossDown':
+        this.steerPlayer(dt);
+        this.scrollFactor = Math.min(1, this.scrollFactor + dt / 4);
+        if (this.phaseTime > BASE_DOWN_TIME) {
+          this.setPhase('waveClear');
+          this.audio.sfx.waveClear();
+          this.flashMessage(`WAVE ${this.spawner.wave} CLEAR`, 'Enemy squadron ahead!\nSwitching to cockpit…', 2.2);
+        }
+        break;
+
       case 'waveClear':
+        this.scrollFactor = Math.min(1, this.scrollFactor + dt / 4);
         // Player can still steer to grab falling power-ups; no firing.
         this.steerPlayer(dt);
         if (this.phaseTime > WAVE_CLEAR_PAUSE && !this.isStrikeWave) {
@@ -407,6 +457,8 @@ export class ShooterScene implements GameScene {
   }
 
   private enterCockpit(): void {
+    this.removeBase();
+    this.scrollFactor = 1;
     this.setPhase('toCockpit');
     this.director.enterCockpit();
     this.audio.sfx.flyIn(COCKPIT.enterDuration);
@@ -432,6 +484,24 @@ export class ShooterScene implements GameScene {
     this.enterCockpit();
   }
 
+  /** Testing shortcut (pause menu): skip to the alien base at the end of planet `planet`. */
+  private jumpToBase(planet: number): void {
+    this.closePause();
+    this.tutorial.cancel();
+    this.clearWorld();
+    this.cockpit.clear();
+    this.director.reset();
+    this.hud.hideMessage();
+    this.messageTimer = 0;
+    this.invulnerable = 1;
+    // Planets sit on every other pair of waves: 3–4, 7–8, 11–12.
+    this.spawner.wave = planet * 4 - 1;
+    this.environment.set(environmentForWave(this.spawner.wave + 1));
+    this.placePlayerAtStart();
+    this.startNextWave();
+    this.spawner.skipWave();
+  }
+
   /** Flies into the next world while the camera pulls out of the cockpit. */
   private changeEnvironment(next: EnvironmentId): void {
     const env = this.environment;
@@ -446,10 +516,163 @@ export class ShooterScene implements GameScene {
 
   /** How close the next planet looms while in space: grows over the pair of waves before it. */
   private planetApproach(): number {
-    if (this.state === 'title' || this.spawner.wave === 0) return 0.25;
+    if (this.state === 'title' || this.spawner.wave === 0) return 0.45;
     const inPair = (this.spawner.wave - 1) % 2;
     if (this.phase === 'shmup' || this.phase === 'waveClear') return ((inPair + this.spawner.progress) / 2) * 0.7;
     return 0.75;
+  }
+
+  /** The last wave on a planet ends at an alien base. */
+  private get isBaseWave(): boolean {
+    return this.isStrikeWave && environmentForWave(this.spawner.wave) !== 'space';
+  }
+
+  // --- Alien base boss -------------------------------------------------------------------
+
+  private startBoss(): void {
+    const env = this.environment;
+    const startY = this.playfield.top + 14;
+    this.baseTerrainY = startY + env.scrollOffset;
+    const groundZ = env.setClearing(0, this.baseTerrainY, BASE_CLEARING);
+    this.base = new AlienBase(groundZ);
+    this.base.y = startY;
+    this.base.update(0);
+    this.scene.add(this.base.object);
+    const hpScale = 1 + WAVES.hpGrowthPerWave * (this.spawner.wave - 1);
+    const difficulty = Math.min(this.time / DIFFICULTY_RAMP_TIME, 1);
+    const part = (kind: EnemyKind, dx: number, dy: number): Enemy => {
+      const e = new Enemy(kind, dx, startY + dy, 0, difficulty, hpScale);
+      e.holdFire = true;
+      this.enemies.push(e);
+      this.scene.add(e.object);
+      return e;
+    };
+    this.bossSentries.length = 0;
+    for (const [dx, dy] of SENTRY_OFFSETS) this.bossSentries.push(part('sentry', dx, dy));
+    this.bossCore = part('core', CORE_OFFSET[0], CORE_OFFSET[1]);
+    this.bossCore.shielded = true;
+    this.hangarTimer = 2.5;
+    this.hangarLaunches = 0;
+    this.setPhase('bossApproach');
+    this.audio.sfx.bossAlarm();
+    this.flashMessage('WARNING', 'Alien base ahead\nDestroy the sentries to drop the core shield', 3.2);
+  }
+
+  /** Keeps the base (and its turrets) locked to the scrolling ground. */
+  private updateBase(dt: number): void {
+    const base = this.base;
+    if (!base) return;
+    base.y = this.baseTerrainY - this.environment.scrollOffset;
+    base.update(dt);
+    const pin = (e: Enemy | null, dx: number, dy: number): void => {
+      if (!e) return;
+      e.anchorX = base.x + dx;
+      e.anchorY = base.y + dy;
+    };
+    this.bossSentries.forEach((e, i) => pin(e, SENTRY_OFFSETS[i]![0], SENTRY_OFFSETS[i]![1]));
+    pin(this.bossCore, CORE_OFFSET[0], CORE_OFFSET[1]);
+    if (this.bossBursts.length > 0) this.updateBossBursts(dt);
+    if (base.y < this.playfield.bottom - 30) this.removeBase();
+  }
+
+  private updateBoss(dt: number, difficulty: number): void {
+    const base = this.base;
+    if (!base) return;
+    const rest = this.playfield.top * BASE_REST;
+    if (this.phase === 'bossApproach') {
+      const d = Math.max(0, base.y - rest);
+      this.scrollFactor = Math.min(1, Math.sqrt(d / BASE_BRAKE_DISTANCE));
+      if (d < 0.03) {
+        this.scrollFactor = 0;
+        this.setPhase('boss');
+        for (const e of this.bossSentries) e.holdFire = false;
+        if (this.bossCore) this.bossCore.holdFire = false;
+      }
+      return;
+    }
+    const alive = this.bossSentries.some((e) => this.enemies.includes(e));
+    const core = this.bossCore;
+    if (core && core.shielded && !alive) {
+      core.shielded = false;
+      this.audio.sfx.shieldDown();
+      this.effects.ring(core.x, core.y, 0.3, 0x57ffd8, 9, 0.6);
+      this.blast(tmpVec.set(core.x, core.y, 0), 0.8);
+      this.flashMessage('SHIELD DOWN', 'Hit the core!', 1.6);
+    }
+    this.hangarTimer -= dt;
+    if (this.hangarTimer <= 0) {
+      this.hangarTimer = MathUtils.lerp(4.8, 3.2, difficulty) * (alive ? 1 : 0.8);
+      this.launchFighters(difficulty);
+    }
+  }
+
+  private launchFighters(difficulty: number): void {
+    const base = this.base;
+    if (!base) return;
+    const kind: EnemyKind = this.hangarLaunches++ % 2 === 0 ? 'grunt' : 'weaver';
+    const hpScale = 1 + WAVES.hpGrowthPerWave * (this.spawner.wave - 1);
+    for (const [dx, dy] of HANGAR_OFFSETS) {
+      const x = base.x + dx;
+      const y = base.y + dy;
+      const e = new Enemy(kind, x, y, Math.random() * Math.PI * 2, difficulty, hpScale);
+      this.enemies.push(e);
+      this.scene.add(e.object);
+      this.effects.flash(x, y, 0, 0xffa040, 4, 0.35);
+      this.effects.ring(x, y, 0.1, 0xffa040, 3, 0.4);
+    }
+    this.audio.sfx.launch();
+  }
+
+  private destroyBase(): void {
+    const base = this.base;
+    this.bossDefeated = true;
+    this.bossCore = null;
+    this.setPhase('bossDown');
+    const bonus = 2500 * Math.round(this.spawner.wave / 2);
+    this.score += bonus;
+    this.flashMessage('BASE DESTROYED', `+${bonus.toLocaleString('en-US')}`, BASE_DOWN_TIME);
+    this.popEnemyBullets();
+    // Everything it launched goes down with it.
+    for (let i = this.enemies.length - 1; i >= 0; i--) this.killEnemy(i);
+    base?.wreck();
+    this.bossBursts = [0, 0.2, 0.35, 0.55, 0.7, 0.9, 1.1, 1.35, 1.6, 1.9, 2.3, 2.8];
+    this.shake = 1.2;
+    this.fx.kickAberration(1.5);
+    navigator.vibrate?.(300);
+  }
+
+  /** Explosion chain across the dying base. */
+  private updateBossBursts(dt: number): void {
+    const base = this.base;
+    if (!base) {
+      this.bossBursts = [];
+      return;
+    }
+    this.bossBursts = this.bossBursts.map((t) => t - dt);
+    while (this.bossBursts.length > 0 && this.bossBursts[0]! <= 0) {
+      this.bossBursts.shift();
+      const first = this.bossBursts.length === 11;
+      const x = base.x + (first ? 0 : MathUtils.randFloatSpread(10));
+      const y = base.y + (first ? CORE_OFFSET[1] : MathUtils.randFloatSpread(9));
+      this.effects.explode(x, y, [0xff3df0, 0xffb443, 0xffffff, 0xff5a36], first ? 120 : 40, first ? 18 : 10, first ? 1.3 : 0.8);
+      this.effects.flash(x, y, 0.2, 0xfff1c9, first ? 14 : 6, 0.5);
+      this.effects.ring(x, y, 0.2, first ? 0x57ffd8 : 0xffb443, first ? 16 : 6, first ? 0.9 : 0.5);
+      this.blast(tmpVec.set(x, y, 0), first ? 2 : 0.7);
+      this.shake = Math.max(this.shake, first ? 1.3 : 0.5);
+      this.audio.sfx.explosion('big');
+    }
+  }
+
+  private removeBase(): void {
+    if (this.base) {
+      this.scene.remove(this.base.object);
+      this.base.dispose();
+      this.base = null;
+    }
+    this.bossSentries.length = 0;
+    this.bossCore = null;
+    this.bossBursts = [];
+    this.environment.clearClearing();
   }
 
   private get isStrikeWave(): boolean {
@@ -503,6 +726,8 @@ export class ShooterScene implements GameScene {
 
   private startNextWave(): void {
     this.setPhase('shmup');
+    this.bossDefeated = false;
+    this.scrollFactor = 1;
     this.spawner.startWave();
     this.fireTimer = 0;
     this.audio.music.play(NOVA_DRIVE, 0.8);
@@ -657,6 +882,8 @@ export class ShooterScene implements GameScene {
     this.enemyBullets.clear();
     this.effects.clear();
     this.deathBursts = [];
+    this.removeBase();
+    this.scrollFactor = 1;
   }
 
   // --- Player --------------------------------------------------------------------------
@@ -874,7 +1101,7 @@ export class ShooterScene implements GameScene {
     let best: Enemy | null = null;
     let bestDist = Infinity;
     for (const e of this.enemies) {
-      if (!e.active || e.y < y - 1 || e.y > this.playfield.top + 0.5) continue;
+      if (!e.active || e.shielded || e.y < y - 1 || e.y > this.playfield.top + 0.5) continue;
       const d = (e.x - x) ** 2 + (e.y - y) ** 2;
       if (d < bestDist) {
         bestDist = d;
@@ -937,8 +1164,8 @@ export class ShooterScene implements GameScene {
 
     // Enemies ramming the player.
     for (let j = this.enemies.length - 1; j >= 0; j--) {
-      const e = this.enemies[j]!;
-      if (!e.active || !circlesOverlap(e.x, e.y, e.radius * 0.8, px, py, PLAYER.hitRadius)) continue;
+      const e = this.enemies[j];
+      if (!e?.active || !circlesOverlap(e.x, e.y, e.radius * 0.8, px, py, PLAYER.hitRadius)) continue;
       if (this.invulnerable > 0) continue;
       if (e.hit(6)) this.killEnemy(j);
       this.damagePlayer();
@@ -962,7 +1189,13 @@ export class ShooterScene implements GameScene {
   private killEnemy(index: number): void {
     const e = this.enemies[index]!;
     this.score += e.score;
-    const big = e.kind === 'tank' || e.kind === 'sprayer';
+    if (e.kind === 'core' && e === this.bossCore) {
+      this.score += e.score;
+      this.removeEnemyAt(index);
+      this.destroyBase();
+      return;
+    }
+    const big = e.kind === 'tank' || e.kind === 'sprayer' || e.kind === 'sentry';
     this.effects.explode(e.x, e.y, EXPLOSION_COLORS[e.kind], big ? 60 : 22, big ? 11 : 8, big ? 0.9 : 0.55);
     this.effects.ring(e.x, e.y, 0.3, big ? 0xffb443 : 0xff5a36, big ? 8 : 3.2, big ? 0.6 : 0.35);
     if (big) {

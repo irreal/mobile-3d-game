@@ -128,7 +128,16 @@ export interface CockpitCallbacks {
   blast: (position: Vector3, strength: number) => void;
 }
 
-const COCKPIT_SCORE: Record<EnemyKind, number> = { grunt: 200, weaver: 250, tank: 1200, diver: 150, sprayer: 1200, swooper: 250 };
+const COCKPIT_SCORE: Record<EnemyKind, number> = {
+  grunt: 200,
+  weaver: 250,
+  tank: 1200,
+  diver: 150,
+  sprayer: 1200,
+  swooper: 250,
+  sentry: 800,
+  core: 5000,
+};
 const NOTE_SCORE: Record<'perfect' | 'great' | 'good', number> = { perfect: 100, great: 70, good: 40 };
 const GRADE_LABEL: Record<Exclude<Grade, 'call'>, string> = {
   perfect: 'PERFECT',

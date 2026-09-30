@@ -1,8 +1,9 @@
 import { MathUtils } from 'three';
 import { createDiver, createGrunt, createSprayer, createSwooper, createTank, createWeaver, disposeModel } from './models.ts';
 import type { Model } from './models.ts';
+import { createCore, createSentry } from './AlienBase.ts';
 
-export type EnemyKind = 'grunt' | 'weaver' | 'tank' | 'diver' | 'sprayer' | 'swooper';
+export type EnemyKind = 'grunt' | 'weaver' | 'tank' | 'diver' | 'sprayer' | 'swooper' | 'sentry' | 'core';
 
 interface EnemyStats {
   hp: number;
@@ -27,6 +28,10 @@ export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
   sprayer: { hp: 34, radius: 1.2, score: 450, speed: 2.6, fireInterval: [1.7, 2.2], create: createSprayer },
   /** Sweeps across the screen from one side in a dipping arc, with one aimed shot. */
   swooper: { hp: 6, radius: 0.8, score: 160, speed: 7, fireInterval: [99, 99], create: createSwooper },
+  /** Alien base turret, fixed on a pylon; fires aimed 3-shot bursts. */
+  sentry: { hp: 45, radius: 1.05, score: 800, speed: 0, fireInterval: [2.4, 3.4], create: createSentry },
+  /** Alien base reactor: shielded while any sentry stands, then fires rings and fans. */
+  core: { hp: 380, radius: 2.1, score: 5000, speed: 0, fireInterval: [1.1, 1.5], create: createCore },
 };
 
 /** Explosion particle colors per kind. */
@@ -37,6 +42,8 @@ export const EXPLOSION_COLORS: Record<EnemyKind, readonly number[]> = {
   diver: [0x57ff9a, 0xb6ffd0, 0xffffff, 0xffe14d],
   sprayer: [0xc04dff, 0xff5ad8, 0xffffff, 0xffe14d, 0x9fe8ff],
   swooper: [0xff9a3d, 0xffe14d, 0xffffff, 0xff5a36],
+  sentry: [0xff3df0, 0xffb443, 0xffffff, 0x9fe8ff],
+  core: [0xff3df0, 0x57ffd8, 0xffffff, 0xffe14d, 0xff5a36],
 };
 
 export interface EnemyContext {
@@ -85,6 +92,15 @@ export class Enemy {
   private travelled = 0;
   private shotFired = false;
   private sprayAngle = 0;
+  private volley = 0;
+  /** Base parts (sentry, core) are pinned here by the scene each frame. */
+  anchorX: number;
+  anchorY: number;
+  /** A shielded enemy takes no damage. */
+  shielded = false;
+  /** Doesn't shoot while set (base parts until the base has arrived). */
+  holdFire = false;
+  private shieldFlash = 0;
 
   constructor(
     readonly kind: EnemyKind,
@@ -106,6 +122,8 @@ export class Enemy {
     this.x = baseX;
     this.prevX = baseX;
     this.y = y;
+    this.anchorX = baseX;
+    this.anchorY = y;
     this.wait = delay;
     // First shot comes a little later so enemies don't fire the instant they appear.
     this.fireTimer = this.nextFireDelay(difficulty) + 0.6;
@@ -139,7 +157,7 @@ export class Enemy {
     if (this.fireTimer <= 0) {
       this.fireTimer = this.nextFireDelay(ctx.difficulty);
       // Only shoot from on screen and from above the player, so shots are always dodgeable.
-      if (onScreen && this.y > ctx.playerY + 2.5) this.shoot(ctx);
+      if (!this.holdFire && onScreen && this.y > ctx.playerY + 2.5) this.shoot(ctx);
     }
 
     this.animate(dt);
@@ -148,6 +166,10 @@ export class Enemy {
 
   /** Applies damage; returns true if this killed the enemy. */
   hit(damage: number): boolean {
+    if (this.shielded) {
+      this.shieldFlash = 0.08;
+      return false;
+    }
     this.hp -= damage;
     this.flashTimer = 0.06;
     return this.hp <= 0;
@@ -229,6 +251,13 @@ export class Enemy {
         }
         return t < 1;
       }
+      case 'sentry':
+      case 'core':
+        this.x = this.anchorX;
+        this.y = this.anchorY;
+        this.dirX = ctx.playerX - this.x;
+        this.dirY = ctx.playerY - this.y;
+        break;
     }
     return true;
   }
@@ -263,6 +292,34 @@ export class Enemy {
         }
         return;
       }
+      case 'sentry': {
+        const aim = Math.atan2(ctx.playerY - this.y, ctx.playerX - this.x);
+        for (let i = -1; i <= 1; i++) {
+          const a = aim + i * MathUtils.degToRad(9);
+          ctx.fire(this.x + Math.cos(aim) * 0.9, this.y + Math.sin(aim) * 0.9, Math.cos(a) * speed * 0.9, Math.sin(a) * speed * 0.9);
+        }
+        return;
+      }
+      case 'core': {
+        // Shielded: slow rings now and then. Exposed: alternating spiral rings and aimed fans.
+        this.volley++;
+        if (this.shielded && this.volley % 2 === 0) return;
+        if (this.shielded || this.volley % 3 !== 0) {
+          const count = this.shielded ? 8 : 14;
+          this.sprayAngle += Math.PI / count;
+          for (let i = 0; i < count; i++) {
+            const a = this.sprayAngle + (i / count) * Math.PI * 2;
+            ctx.fire(this.x, this.y, Math.cos(a) * speed * 0.6, Math.sin(a) * speed * 0.6);
+          }
+        } else {
+          const aim = Math.atan2(ctx.playerY - this.y, ctx.playerX - this.x);
+          for (let i = -3; i <= 3; i++) {
+            const a = aim + i * MathUtils.degToRad(11);
+            ctx.fire(this.x, this.y - 1, Math.cos(a) * speed * 0.8, Math.sin(a) * speed * 0.8);
+          }
+        }
+        return;
+      }
       default:
     }
   }
@@ -287,6 +344,25 @@ export class Enemy {
       // Nose (-y) toward the locked-on direction.
       const target = Math.atan2(this.dirY, this.dirX) + Math.PI / 2;
       obj.rotation.z = MathUtils.damp(obj.rotation.z, target, 14, dt);
+    }
+    if (this.kind === 'sentry') {
+      obj.rotation.z = MathUtils.damp(obj.rotation.z, Math.atan2(this.dirY, this.dirX) + Math.PI / 2, 6, dt);
+    }
+    if (this.kind === 'core') {
+      const spin = obj.getObjectByName('spin');
+      if (spin) spin.rotation.z += dt * (this.shielded ? 0.6 : 2.2);
+      const crystal = obj.getObjectByName('crystal');
+      if (crystal) {
+        crystal.rotation.x += dt * 0.7;
+        crystal.rotation.y += dt * 0.5;
+        crystal.scale.setScalar(1 + Math.sin(this.age * (this.shielded ? 3 : 7)) * 0.06);
+      }
+      const shield = obj.getObjectByName('shield');
+      if (shield) {
+        shield.visible = this.shielded;
+        this.shieldFlash = Math.max(0, this.shieldFlash - dt);
+        shield.scale.setScalar(1 + Math.sin(this.age * 2.4) * 0.03 + this.shieldFlash * 0.5);
+      }
     }
     if (this.kind === 'swooper') {
       const t = this.travelled / (2 * Math.abs(this.startX) || 1);

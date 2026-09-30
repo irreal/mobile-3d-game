@@ -71,10 +71,20 @@ won't work over plain-HTTP LAN; use the deployed GitHub Pages site to test those
 Every cockpit strike ends by flying into a new world, which lasts for the next two waves, with a
 stretch of deep space between planets: space (waves 1–2), the desert planet **Kharan** (3–4),
 space (5–6), the ocean world **Thalassa** (7–8), space (9–10), the molten world **Vulcan**
-(11–12), then around again. In space the next planet hangs ahead of you (below in the top-down
-view, ahead in the cockpit) and grows over the two waves. After the strike the ship dives at it
+(11–12), then around again. In space the next planet slowly drifts in from the top of the screen
+(ahead in the cockpit) and grows over the two waves. After the strike the ship dives at it
 until it fills the view, burns through the upper atmosphere (heat glow and shake), punches
 through the clouds and levels out over the ground. Leaving, the planet drops away behind you.
+**Alien base (boss):** each planet ends with a giant alien base on the surface. After the last
+wave's formations, a klaxon sounds and the scroll brakes to a stop as the base arrives. It is a
+hex fortress (`AlienBase.ts`, built from primitives) standing on a flattened clearing of the terrain, with
+four **sentry** turrets on tall pylons (aimed 3-shot bursts) around a **reactor core**. The core
+is shielded until every sentry is destroyed, and fires rings (faster, plus aimed fans, once
+exposed). Two hangars keep launching pairs of fighters. Destroying the core blows up the
+base in a chain of explosions (and everything it launched), pays a bonus, and the wreck scrolls
+away as the flight resumes into the cockpit strike. *Base test* in the pause menu jumps straight
+to each planet's base.
+
 Planets are drawn by `Environment.ts` (and `Planet.ts` for the globe seen from space): a sky dome, a procedural heightfield terrain scrolling below the playfield
 (mesas, islands in a sea, or rock over glowing lava, with fog toward the horizon) and drifting
 clouds; stars and the nebula fade out while inside an atmosphere. Everything is generated in
