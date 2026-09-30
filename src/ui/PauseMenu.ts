@@ -1,3 +1,5 @@
+import { replyDelayBeats, setReplyDelayBeats } from '../game/replyDelay.ts';
+
 export interface PauseMenuActions {
   pause: () => void;
   resume: () => void;
@@ -57,6 +59,7 @@ export class PauseMenu {
       this.effectsButton,
       this.tutorialButton,
       testRow(actions.jumpToCockpit),
+      replyDelayRow(),
       menuButton('Quit to title', actions.quit),
       credits(),
     );
@@ -117,6 +120,27 @@ function testRow(jump: (strike: number) => void): HTMLDivElement {
     b.classList.add('small');
     row.append(b);
   }
+  return row;
+}
+
+/** Stepper for the cockpit call-to-reply delay; applies from the next call. */
+function replyDelayRow(): HTMLDivElement {
+  const row = document.createElement('div');
+  row.className = 'menu-row';
+  const label = document.createElement('span');
+  const render = (): void => {
+    label.textContent = `Reply delay: ${replyDelayBeats()} beats`;
+  };
+  const step = (by: number) => () => {
+    setReplyDelayBeats(replyDelayBeats() + by);
+    render();
+  };
+  const minus = menuButton('−', step(-1));
+  const plus = menuButton('+', step(1));
+  minus.classList.add('small');
+  plus.classList.add('small');
+  row.append(label, minus, plus);
+  render();
   return row;
 }
 

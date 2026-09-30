@@ -7,6 +7,7 @@ import { COCKPIT } from './constants.ts';
 import type { Effects } from './Effects.ts';
 import { ENEMY_STATS } from './Enemy.ts';
 import type { EnemyKind } from './Enemy.ts';
+import { replyDelayBeats } from './replyDelay.ts';
 import { createGlowMaterial, glowGeometry } from './glow.ts';
 import { disposeModel, sharedGeometries } from './models.ts';
 import type { Model } from './models.ts';
@@ -36,7 +37,7 @@ interface Fighter {
   streak: Mesh | null;
 }
 
-/** One enemy in a phrase: it calls on `callBeat`, and must be tapped on `callBeat + RESPONSE_OFFSET`. */
+/** One enemy in a phrase: it calls on `callBeat`, and must be tapped on `callBeat + phrase.reply`. */
 interface Note {
   fighter: Fighter;
   callBeat: number;
@@ -54,9 +55,11 @@ interface Note {
   onScreen: boolean;
 }
 
-/** The call bar from `start`, the response bar, then a rest (PHRASE_BEATS in all). */
+/** The call bar from `start`, a pause, the response bar, then a rest. */
 interface Phrase {
   start: number;
+  /** Beats from each call to its reply; the swoosh ends on the first reply. */
+  reply: number;
   notes: Note[];
   resolved: boolean;
   /** The "your turn" cue at the start of the response bar. */
@@ -122,12 +125,10 @@ const PATTERNS: readonly (readonly string[])[] = [
   ['x.xxx...', 'xx.x.x..', 'x.x.xx..', 'x..xxx..', 'xx.xx...'],
   ['x.xxxx..', 'xx.xxx..', 'xxx.xx..', 'xxxx.x..', 'x.xxx.x.'],
 ];
-/** Beats from a call to its reply: a pause of a bar and a half after the call starts. */
-const RESPONSE_OFFSET = 6;
-/** Beat (from the phrase start) where the swoosh ends: right on the first reply. */
-const CUE_BEAT = RESPONSE_OFFSET;
-/** Beats per phrase: call, pause, response, then a rest before the next call (bar aligned). */
-const PHRASE_BEATS = 16;
+/** Beats per phrase (call, pause, response, rest), kept on bar lines. */
+function phraseBeats(reply: number): number {
+  return Math.ceil((reply + 7) / 4) * 4;
+}
 /** After taking a hit, at least this many beats pass before the next phrase (on a bar line). */
 const HIT_PAUSE_BEATS = 7;
 /** Hits a heavy takes; it stays and joins one call per phrase until destroyed. */
@@ -404,18 +405,17 @@ export class CockpitSection {
     // After a miss, nothing new warps in until the return fire has landed and been dealt with.
     if (this.volleys.length > 0 || this.phrases.some((p) => p.notes.some((n) => n.missed))) return;
     while (this.phraseCount < this.totalPhrases && this.beat >= this.nextPhrase - 2) {
-      this.planPhrase(this.nextPhrase);
-      this.nextPhrase += PHRASE_BEATS;
+      this.nextPhrase += phraseBeats(this.planPhrase(this.nextPhrase).reply);
     }
   }
 
-  private planPhrase(start: number): void {
+  private planPhrase(start: number): Phrase {
     const index = this.phraseCount++;
     const level = Math.min(PATTERNS.length - 1, this.strike - 1 + (index >= this.totalPhrases / 2 ? 1 : 0));
     const options = PATTERNS[level]!;
     const pattern = options[MathUtils.randInt(0, options.length - 1)]!;
     const slots = [...pattern].flatMap((c, i) => (c === 'x' ? [i] : []));
-    const phrase: Phrase = { start, notes: [], resolved: false, cueSounded: false, cueShown: false };
+    const phrase: Phrase = { start, reply: replyDelayBeats(), notes: [], resolved: false, cueSounded: false, cueShown: false };
 
     // A heavy already on the field joins this call; from the 2nd strike new ones show up.
     let heavy = this.fighters.find((f) => f.alive && f.kind === 'tank' && f.leaving === null) ?? null;
@@ -440,7 +440,7 @@ export class CockpitSection {
       phrase.notes.push({
         fighter,
         callBeat,
-        beat: callBeat + RESPONSE_OFFSET,
+        beat: callBeat + phrase.reply,
         order,
         phrase,
         callSounded: false,
@@ -455,6 +455,7 @@ export class CockpitSection {
     });
     this.notesTotal += phrase.notes.length;
     this.phrases.push(phrase);
+    return phrase;
   }
 
   /** Hover spots in one or two rows that keep targets apart on screen. */
@@ -491,7 +492,7 @@ export class CockpitSection {
   /** Schedules call sounds on the music clock and shows each call as it happens. */
   private updateCalls(): void {
     for (const p of this.phrases) {
-      const turn = p.start + CUE_BEAT;
+      const turn = p.start + p.reply;
       if (!p.cueSounded && this.beat >= turn - 1.5) {
         p.cueSounded = true;
         const riseStart = this.music.timeOfBeat(turn - 1) ?? undefined;
@@ -545,7 +546,7 @@ export class CockpitSection {
   private resolvePhrases(): void {
     for (let i = this.phrases.length - 1; i >= 0; i--) {
       const p = this.phrases[i]!;
-      const end = p.start + RESPONSE_OFFSET + 4;
+      const end = p.start + p.reply + 4;
       if (this.beat < end) continue;
       if (!p.resolved) {
         p.resolved = true;
@@ -879,7 +880,7 @@ export class CockpitSection {
         n.sr = screen.r;
         // Targets get their numbered circle once their call is done and the reply is near.
         const until = n.beat - this.beat;
-        if (!n.called || this.beat < p.start + RESPONSE_OFFSET - COCKPIT.approachBeats) continue;
+        if (!n.called || this.beat < p.start + p.reply - COCKPIT.approachBeats) continue;
         const isNext = n === next;
         this.markers.push({
           x: screen.x,
@@ -898,11 +899,11 @@ export class CockpitSection {
     this.overlay.setShield(this.shield, COCKPIT.shield);
     this.overlay.setTimer(1 - this.phraseCount / Math.max(1, this.totalPhrases));
 
-    const current = this.phrases.find((p) => this.beat >= p.start && this.beat < p.start + RESPONSE_OFFSET + 4);
+    const current = this.phrases.find((p) => this.beat >= p.start && this.beat < p.start + p.reply + 4);
     const inPhrase = current ? this.beat - current.start : 0;
-    const mode: PhraseMode = !current ? null : inPhrase < CUE_BEAT ? 'watch' : 'repeat';
-    // REPEAT shows from the cue; its beat pips start with the response itself.
-    const pip = inPhrase < CUE_BEAT ? Math.floor(inPhrase) : Math.floor(inPhrase - RESPONSE_OFFSET);
+    const replying = current !== undefined && inPhrase >= current.reply;
+    const mode: PhraseMode = !current ? null : replying ? 'repeat' : 'watch';
+    const pip = Math.floor(replying ? inPhrase - current.reply : inPhrase);
     this.overlay.setPhase(mode, pip);
     this.overlay.setHintVisible(frame.active && this.phraseCount <= 2 && this.strike <= 1);
   }

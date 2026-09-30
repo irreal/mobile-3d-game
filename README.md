@@ -75,8 +75,8 @@ phrases of three bars (call bar, response bar, then a rest bar):
   first three beats of the bar. Each warp
   flash lands on the beat with its own tone (climbing the current chord), and a number pops up to
   show its place in the sequence.
-- **REPEAT (response):** tap the enemies back **in the same order and rhythm**, six beats after
-  the call (a bar and a half). Each target shows its number, the next one is highlighted and a ring closes on it over the last
+- **REPEAT (response):** tap the enemies back **in the same order and rhythm**, a few beats
+  after the call (5 by default; tunable 4–8 via *Reply delay* in the pause menu, applied from the next call). Each target shows its number, the next one is highlighted and a ring closes on it over the last
   beat. The bar at the bottom shows the call (hollow) and the reply (solid) scrolling toward the
   hit line; the indicator at the top shows WATCH/REPEAT and the beat within the bar. The switch
   to your turn is marked by a one-beat swoosh that cuts off exactly on your first tap, together
