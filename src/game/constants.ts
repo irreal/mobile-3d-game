@@ -113,7 +113,7 @@ export const COCKPIT = {
   /** Phrases with misses cost a shield pip (refilled each strike); with none left, a life. */
   shield: 3,
   /** Beats an approach ring takes to close onto its target. */
-  approachBeats: 1,
+  approachBeats: 2,
   /** Timing windows (ms either side of the beat) for each judgement. */
   perfectMs: 70,
   greatMs: 130,

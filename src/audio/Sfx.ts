@@ -239,7 +239,7 @@ export class Sfx {
     const start = riseStart ?? now;
     const hit = time ?? now;
     const rise = Math.max(0.05, hit - start);
-    // Builds over the lead-in beat and cuts off exactly on the first reply.
+    // Builds over the lead-in and cuts off exactly on the first reply.
     this.a.noise({
       time: start,
       duration: rise,

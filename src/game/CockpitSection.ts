@@ -125,6 +125,8 @@ const PATTERNS: readonly (readonly string[])[] = [
   ['x.xxx...', 'xx.x.x..', 'x.x.xx..', 'x..xxx..', 'xx.xx...'],
   ['x.xxxx..', 'xx.xxx..', 'xxx.xx..', 'xxxx.x..', 'x.xxx.x.'],
 ];
+/** Beats the swoosh builds before cutting off on the first reply. */
+const CUE_RISE_BEATS = 2;
 /** Beats per phrase (call, pause, response, rest), kept on bar lines. */
 function phraseBeats(reply: number): number {
   return Math.ceil((reply + 7) / 4) * 4;
@@ -493,9 +495,9 @@ export class CockpitSection {
   private updateCalls(): void {
     for (const p of this.phrases) {
       const turn = p.start + p.reply;
-      if (!p.cueSounded && this.beat >= turn - 1.5) {
+      if (!p.cueSounded && this.beat >= turn - CUE_RISE_BEATS - 0.5) {
         p.cueSounded = true;
-        const riseStart = this.music.timeOfBeat(turn - 1) ?? undefined;
+        const riseStart = this.music.timeOfBeat(turn - CUE_RISE_BEATS) ?? undefined;
         this.sfx.responseCue(riseStart, this.music.timeOfBeat(turn) ?? undefined);
       }
       if (!p.cueShown && this.beat >= turn) {

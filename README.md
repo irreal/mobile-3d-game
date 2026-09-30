@@ -76,10 +76,10 @@ phrases of three bars (call bar, response bar, then a rest bar):
   flash lands on the beat with its own tone (climbing the current chord), and a number pops up to
   show its place in the sequence.
 - **REPEAT (response):** tap the enemies back **in the same order and rhythm**, a few beats
-  after the call (5 by default; tunable 4–8 via *Reply delay* in the pause menu, applied from the next call). Each target shows its number, the next one is highlighted and a ring closes on it over the last
-  beat. The bar at the bottom shows the call (hollow) and the reply (solid) scrolling toward the
+  after the call (4 by default; tunable 4–8 via *Reply delay* in the pause menu, applied from the next call). Each target shows its number, the next one is highlighted and a ring closes on it over the last two
+  beats. The bar at the bottom shows the call (hollow) and the reply (solid) scrolling toward the
   hit line; the indicator at the top shows WATCH/REPEAT and the beat within the bar. The switch
-  to your turn is marked by a one-beat swoosh that cuts off exactly on your first tap, together
+  to your turn is marked by a two-beat swoosh that cuts off exactly on your first tap, together
   with a gold flash and REPEAT. During strikes the music is ducked slightly so calls and taps stand out.
 - Timing is judged against what you *hear* (the audio clock, corrected for output latency) using
   the touch event's own timestamp: **PERFECT** within ±70 ms, **GREAT** ±130 ms, **GOOD** ±200 ms.
