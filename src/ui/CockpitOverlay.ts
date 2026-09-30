@@ -241,10 +241,20 @@ export class CockpitOverlay {
 
   /** WATCH / REPEAT indicator with one pip per beat of the current bar. */
   setPhase(mode: PhraseMode, beatInBar: number): void {
-    this.phase.className = mode ? `cockpit-phase ${mode}` : 'cockpit-phase';
+    this.phase.classList.toggle('watch', mode === 'watch');
+    this.phase.classList.toggle('repeat', mode === 'repeat');
     const text = mode === 'watch' ? 'WATCH' : mode === 'repeat' ? 'REPEAT' : '';
     if (this.phaseLabel.textContent !== text) this.phaseLabel.textContent = text;
     this.phasePips.forEach((p, i) => p.classList.toggle('on', mode !== null && i <= beatInBar));
+  }
+
+  /** Flash marking the switch from the call to the player's response. */
+  cueResponse(): void {
+    for (const el of [this.root, this.phase]) {
+      el.classList.remove('cue');
+      void el.offsetWidth;
+      el.classList.add('cue');
+    }
   }
 
   setShield(level: number, max: number): void {
@@ -299,7 +309,7 @@ export class CockpitOverlay {
     this.callout.classList.remove('pop');
     this.calloutTimer = 0;
     this.bootTimer = 0;
-    this.root.classList.remove('booting');
+    this.root.classList.remove('booting', 'cue');
   }
 }
 

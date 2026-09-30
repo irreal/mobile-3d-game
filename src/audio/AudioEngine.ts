@@ -36,6 +36,7 @@ export interface NoiseSpec {
 }
 
 const MUTE_STORAGE_KEY = 'nova-strike:muted';
+export const MUSIC_LEVEL = 0.55;
 
 type AudioContextCtor = typeof AudioContext;
 
@@ -82,7 +83,7 @@ export class AudioEngine {
     this.master.connect(compressor);
 
     this.musicLevel = ctx.createGain();
-    this.musicLevel.gain.value = 0.55;
+    this.musicLevel.gain.value = MUSIC_LEVEL;
     this.musicLevel.connect(this.master);
     this.musicFilter = ctx.createBiquadFilter();
     this.musicFilter.type = 'lowpass';
@@ -140,6 +141,11 @@ export class AudioEngine {
     }
     const latency = (ctx.outputLatency || 0) + (ctx.baseLatency || 0);
     return ctx.currentTime - latency + (perfMs - now) / 1000;
+  }
+
+  /** Fades the music bus level (e.g. ducked so rhythm cues stand out). */
+  setMusicLevel(level: number, seconds: number): void {
+    if (this.ctx) this.musicLevel.gain.setTargetAtTime(level, this.ctx.currentTime, Math.max(0.01, seconds / 3));
   }
 
   setEchoTime(seconds: number): void {

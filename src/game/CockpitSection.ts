@@ -59,6 +59,9 @@ interface Phrase {
   start: number;
   notes: Note[];
   resolved: boolean;
+  /** The "your turn" cue at the start of the response bar. */
+  cueSounded: boolean;
+  cueShown: boolean;
 }
 
 /** Return fire from enemies that weren't hit; lands on `hitBeat`. */
@@ -401,7 +404,7 @@ export class CockpitSection {
     const options = PATTERNS[level]!;
     const pattern = options[MathUtils.randInt(0, options.length - 1)]!;
     const slots = [...pattern].flatMap((c, i) => (c === 'x' ? [i] : []));
-    const phrase: Phrase = { start, notes: [], resolved: false };
+    const phrase: Phrase = { start, notes: [], resolved: false, cueSounded: false, cueShown: false };
 
     // A heavy already on the field joins this call; from the 2nd strike new ones show up.
     let heavy = this.fighters.find((f) => f.alive && f.kind === 'tank' && f.leaving === null) ?? null;
@@ -477,6 +480,16 @@ export class CockpitSection {
   /** Schedules call sounds on the music clock and shows each call as it happens. */
   private updateCalls(): void {
     for (const p of this.phrases) {
+      const turn = p.start + 4;
+      if (!p.cueSounded && this.beat >= turn - 1.5) {
+        p.cueSounded = true;
+        const riseStart = this.music.timeOfBeat(turn - 1) ?? undefined;
+        this.sfx.responseCue(riseStart, this.music.timeOfBeat(turn) ?? undefined);
+      }
+      if (!p.cueShown && this.beat >= turn) {
+        p.cueShown = true;
+        this.overlay.cueResponse();
+      }
       for (const n of p.notes) {
         if (!n.fighter.alive && !n.judged) {
           // A heavy destroyed before its next call: that note is dropped.
@@ -604,7 +617,9 @@ export class CockpitSection {
   }
 
   private leave(f: Fighter): void {
-    if (f.leaving === null) f.leaving = 0;
+    // Not out of warp yet: it simply never arrives.
+    if (!f.visible) this.removeFighter(f);
+    else f.leaving ??= 0;
   }
 
   private updateFighters(dt: number): void {
@@ -705,13 +720,36 @@ export class CockpitSection {
         this.shield--;
         this.sfx.shieldHit();
         this.overlay.hitFlash();
-        this.overlay.showCallout(this.shield > 0 ? 'SHIELD HIT' : 'SHIELD DOWN!', 0.9);
+        this.overlay.showCallout(this.shield > 0 ? 'SHIELD HIT' : 'SHIELD DOWN!', 1.2);
         this.callbacks.blast(this.eye, 0.3);
       } else {
         this.callbacks.playerHit();
         if (!this.running) return;
       }
+      this.interruptSequence();
+      // A hit may also have cleared the remaining volleys.
+      return;
     }
+  }
+
+  /**
+   * After taking a hit, the sequence stops: the ships on the field fly away, and a fresh
+   * phrase starts once the current bar is over. Phrases that were cut before any reply
+   * are replayed, and their notes don't count against accuracy.
+   */
+  private interruptSequence(): void {
+    for (const p of this.phrases) {
+      if (p.resolved) continue;
+      const pending = p.notes.filter((n) => !n.judged);
+      this.notesTotal -= pending.length;
+      if (pending.length === p.notes.length) this.phraseCount--;
+      for (const n of pending) n.judged = n.called = n.callSounded = true;
+    }
+    this.phrases.length = 0;
+    for (const f of [...this.fighters]) {
+      if (f.alive && f.hp - f.inFlight > 0) this.leave(f);
+    }
+    this.nextPhrase = Math.ceil((this.beat + 2) / 4) * 4;
   }
 
   // --- Rockets -------------------------------------------------------------------------

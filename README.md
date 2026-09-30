@@ -77,7 +77,9 @@ phrases of two bars:
 - **REPEAT (response bar):** tap the enemies back **in the same order and rhythm**, one bar later.
   Each target shows its number, the next one is highlighted and a ring closes on it over the last
   beat. The bar at the bottom shows the call (hollow) and the reply (solid) scrolling toward the
-  hit line; the indicator at the top shows WATCH/REPEAT and the beat within the bar.
+  hit line; the indicator at the top shows WATCH/REPEAT and the beat within the bar. The switch
+  to your turn is marked by a riser over the last beat of the call and a chime plus a gold
+  flash on the downbeat. During strikes the music is ducked slightly so calls and taps stand out.
 - Timing is judged against what you *hear* (the audio clock, corrected for output latency) using
   the touch event's own timestamp: **PERFECT** within ±70 ms, **GREAT** ±130 ms, **GOOD** ±200 ms.
   Tapping a target far too early is a MISS, so spamming doesn't work.
@@ -86,7 +88,9 @@ phrases of two bars:
   calls, so the response "answers" the call melody.
 - Enemies you missed **fire back** at the end of the phrase (a volley that lands 1½ beats later)
   and warp away. Each volley costs one of 3 shield pips (refilled every strike); with the shield
-  down it costs a life.
+  down it costs a life. A hit interrupts the sequence: every ship still on the field flies away,
+  and a fresh phrase starts after the current bar (an interrupted phrase is replayed and doesn't
+  count against accuracy).
 - **Heavies** (orange, from the second strike) stay on the field and join one call per phrase
   until they've been hit twice.
 - Rhythms get denser with each strike and again halfway through; from level 3 the sequence jumps

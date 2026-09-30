@@ -11,6 +11,7 @@ import {
 } from 'three';
 import type { PerspectiveCamera } from 'three';
 import type { PostFx } from '../core/PostFx.ts';
+import { MUSIC_LEVEL } from '../audio/AudioEngine.ts';
 import type { GameAudio } from '../audio/GameAudio.ts';
 import { LOCK_ON, NOVA_DRIVE } from '../audio/songs.ts';
 import type { GameScene } from '../core/Engine.ts';
@@ -428,6 +429,8 @@ export class ShooterScene implements GameScene {
     this.cockpitOverlay.powerOn(COCKPIT.bootDuration);
     this.audio.sfx.hudBoot(COCKPIT.bootDuration);
     this.audio.music.play(LOCK_ON, 0.4);
+    // Duck the music a little so calls, taps and cues cut through.
+    this.audio.engine.setMusicLevel(MUSIC_LEVEL * 0.7, 1);
     this.setMusicCutoff(20000, COCKPIT.bootDuration);
   }
 
@@ -464,6 +467,7 @@ export class ShooterScene implements GameScene {
     this.spawner.startWave();
     this.fireTimer = 0;
     this.audio.music.play(NOVA_DRIVE, 0.8);
+    this.audio.engine.setMusicLevel(MUSIC_LEVEL, 1);
     this.setMusicCutoff(20000, 1.2);
     this.flashMessage(`WAVE ${this.spawner.wave}`, '', 1.4);
   }
@@ -500,6 +504,7 @@ export class ShooterScene implements GameScene {
     this.cockpit.clear();
     this.director.reset();
     this.audio.music.stop(0.8);
+    this.audio.engine.setMusicLevel(MUSIC_LEVEL, 1);
     this.messageTimer = 0;
     this.enterTitle();
   }
