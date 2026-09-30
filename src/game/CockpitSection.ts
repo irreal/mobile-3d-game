@@ -602,8 +602,8 @@ export class CockpitSection {
     const model = ENEMY_STATS[kind].create();
     model.object.scale.setScalar(FIGHTER_SCALE);
     model.object.rotation.x = FIGHTER_PITCH;
-    // Straight down the line of sight, so the warp exit reads as coming from the vanishing point.
-    const start = hover.clone().add(tmp.set(0, WARP_IN_DISTANCE, 0));
+    // Placed on the line of sight when the warp exit begins (see beginWarpIn).
+    const start = hover.clone();
     model.object.position.copy(start);
     model.object.visible = false;
     this.scene.add(model.object);
@@ -646,9 +646,10 @@ export class CockpitSection {
       const age = (this.beat - f.warpStartBeat) * beatSec;
 
       if (f.leaving !== null) {
-        // Warp back out: accelerate away down the line of sight.
+        // Warp back out: accelerate away along the line of sight, staying put on screen.
         f.leaving += dt;
-        f.position.y += (6 + 260 * f.leaving * f.leaving) * dt;
+        tmp.subVectors(f.position, this.eye);
+        f.position.addScaledVector(tmp, ((6 + 260 * f.leaving * f.leaving) * dt) / Math.max(1, tmp.y));
         f.model.object.scale.set(FIGHTER_SCALE, FIGHTER_SCALE * (1 + f.leaving * 8), FIGHTER_SCALE);
         if (f.leaving > 0.9 || !f.alive) {
           this.removeFighter(f);
@@ -679,7 +680,14 @@ export class CockpitSection {
   private beginWarpIn(f: Fighter): void {
     f.visible = true;
     f.model.object.visible = true;
+    // Straight out of depth along the line of sight through its hover spot, so it already
+    // sits where it will end up on screen.
+    tmp.subVectors(f.hover, this.eye);
+    f.start.copy(f.hover).addScaledVector(tmp, WARP_IN_DISTANCE / Math.max(1, tmp.y));
+    f.position.copy(f.start);
+    this.effects.flash(f.hover.x, f.hover.y, f.hover.z, 0x9fe8ff, f.kind === 'tank' ? 4 : 2.6, 0.35);
     f.streak = new Mesh(sharedGeometries.warpStreak, this.streakMaterial);
+    f.streak.quaternion.setFromUnitVectors(tmp2.set(0, 1, 0), tmp.normalize());
     this.scene.add(f.streak);
   }
 
@@ -692,8 +700,11 @@ export class CockpitSection {
     if (!f.warpedIn && this.beat >= f.arriveBeat) {
       f.warpedIn = true;
       const p = f.position;
-      this.effects.explode(p.x, p.y, WARP_FLASH_COLORS, 18, 7, 0.4, p.z);
-      this.effects.ring(p.x, p.y, p.z, 0x9fe8ff, f.kind === 'tank' ? 6 : 3.2, 0.4, true);
+      const big = f.kind === 'tank' ? 1.6 : 1;
+      this.effects.explode(p.x, p.y, WARP_FLASH_COLORS, 30, 9, 0.5, p.z);
+      this.effects.flash(p.x, p.y, p.z, 0xffffff, 7 * big, 0.45);
+      this.effects.ring(p.x, p.y, p.z, 0xffffff, 3 * big, 0.3, true);
+      this.effects.ring(p.x, p.y, p.z, 0x9fe8ff, 6.5 * big, 0.6, true);
     }
 
     if (!f.streak) return;
@@ -703,7 +714,8 @@ export class CockpitSection {
       f.streak = null;
       return;
     }
-    f.streak.position.set(f.position.x, f.position.y + length / 2, f.position.z);
+    tmp.subVectors(f.position, this.eye).normalize();
+    f.streak.position.copy(f.position).addScaledVector(tmp, length / 2);
     const width = FIGHTER_SCALE * (0.6 + speed);
     f.streak.scale.set(width, length, width);
   }
