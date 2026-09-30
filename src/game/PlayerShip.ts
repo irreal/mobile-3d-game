@@ -7,6 +7,8 @@ export class PlayerShip {
   readonly model: PlayerModel = createPlayerShip();
   x = 0;
   y = 0;
+  /** Blown up (game over): stays hidden until placed again. */
+  destroyed = false;
   private prevX = 0;
   private time = 0;
 
@@ -21,6 +23,7 @@ export class PlayerShip {
   place(x: number, y: number): void {
     this.x = this.prevX = x;
     this.y = y;
+    this.destroyed = false;
     this.object.rotation.set(0, 0, 0);
     this.sync(0, 0);
   }
@@ -38,6 +41,6 @@ export class PlayerShip {
     obj.rotation.y = MathUtils.damp(obj.rotation.y, targetRoll, 10, dt);
 
     this.model.flame.scale.set(1, 0.8 + Math.sin(this.time * 40) * 0.2 + Math.random() * 0.15, 1);
-    obj.visible = invulnerable <= 0 || Math.floor(invulnerable * 14) % 2 === 0;
+    obj.visible = !this.destroyed && (invulnerable <= 0 || Math.floor(invulnerable * 14) % 2 === 0);
   }
 }

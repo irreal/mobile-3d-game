@@ -39,7 +39,7 @@ import {
 } from './constants.ts';
 import { Effects } from './Effects.ts';
 import { createGlowMaterial, glowGeometry } from './glow.ts';
-import { Enemy } from './Enemy.ts';
+import { Enemy, EXPLOSION_COLORS } from './Enemy.ts';
 import type { EnemyContext, EnemyKind } from './Enemy.ts';
 import { InstancedPool } from './InstancedPool.ts';
 import { createPowerup, disposeModel, POWERUP_COLORS, sharedGeometries } from './models.ts';
@@ -80,11 +80,6 @@ interface Powerup {
   y: number;
 }
 
-const ENEMY_COLORS: Record<EnemyKind, readonly number[]> = {
-  grunt: [0xff5a36, 0xffb443, 0xffffff],
-  weaver: [0xff2d55, 0xffb443, 0xffffff],
-  tank: [0xff5a36, 0xffe14d, 0xff2d55, 0xffffff],
-};
 const PLAYER_COLORS = [0xdfe7ff, 0x3b7bff, 0x6ff3ff, 0xffa040];
 const PLAYER_BULLET_COLOR = new Color(0x7ff6ff).multiplyScalar(1.25);
 
@@ -123,6 +118,8 @@ export class ShooterScene implements GameScene {
   private readonly drag: Vec2 = { x: 0, y: 0 };
   private readonly unsubscribeTap: () => void;
   private readonly unsubscribePress: () => void;
+  private readonly unsubscribeMove: () => void;
+  private readonly unsubscribeRelease: () => void;
   private readonly enemyContext: EnemyContext;
   private readonly director = new CameraDirector();
   private readonly cockpitFill = new DirectionalLight(0xcfe0ff, 0);
@@ -154,6 +151,11 @@ export class ShooterScene implements GameScene {
   private musicCutoff = 20000;
   private prevBlend = 0;
   private plumeTimer = 0;
+  /** Pending seconds (since death) of the player's explosion chain. */
+  private deathBursts: number[] = [];
+  private deathTime = 0;
+  private deathSpread = 1;
+  private readonly deathCenter = new Vector3();
   private readonly hud: Hud;
   private readonly cockpitOverlay: CockpitOverlay;
   private readonly pauseMenu: PauseMenu;
@@ -246,6 +248,10 @@ export class ShooterScene implements GameScene {
       if (this.frozen) return;
       if (this.state === 'playing' && this.phase === 'cockpit') this.cockpit.tap(x, y, time);
     });
+    this.unsubscribeMove = input.onPointerMove((x, y) => {
+      if (!this.frozen) this.cockpit.drag(x, y);
+    });
+    this.unsubscribeRelease = input.onRelease(() => this.cockpit.release());
     this.enterTitle();
   }
 
@@ -291,6 +297,7 @@ export class ShooterScene implements GameScene {
     this.invulnerable = Math.max(0, this.invulnerable - dt);
     this.player.sync(dt, this.invulnerable);
     this.updateEnginePlume(dt);
+    this.updateDeathBursts(dt);
     this.effects.update(dt, this.camera);
     const blend = this.director.blend;
     this.cockpitFill.intensity = 2.6 * blend;
@@ -522,6 +529,8 @@ export class ShooterScene implements GameScene {
   dispose(): void {
     this.unsubscribeTap();
     this.unsubscribePress();
+    this.unsubscribeMove();
+    this.unsubscribeRelease();
     this.clearWorld();
     this.cockpit.dispose();
     this.warp.dispose();
@@ -612,6 +621,7 @@ export class ShooterScene implements GameScene {
     this.rockets.clear();
     this.enemyBullets.clear();
     this.effects.clear();
+    this.deathBursts = [];
   }
 
   // --- Player --------------------------------------------------------------------------
@@ -689,7 +699,9 @@ export class ShooterScene implements GameScene {
     navigator.vibrate?.(this.lives > 0 ? 80 : 250);
     this.audio.sfx.playerHit();
     this.fx.kickAberration(1.2);
-    if (this.director.blend > 0) {
+    if (this.lives <= 0) {
+      this.explodePlayer();
+    } else if (this.director.blend > 0) {
       this.cockpitOverlay.hitFlash();
     } else {
       this.effects.explode(x, y, PLAYER_COLORS, 40, 12, 0.9);
@@ -708,6 +720,47 @@ export class ShooterScene implements GameScene {
     this.invulnerable = PLAYER.invulnerableTime;
   }
 
+  /** Final hit: the ship blows up in a chain of explosions (in view, in first person too). */
+  private explodePlayer(): void {
+    this.player.destroyed = true;
+    this.player.object.visible = false;
+    this.shake = 1.2;
+    if (this.director.blend > 0) {
+      this.cockpitOverlay.hitFlash();
+      // Keep the first-person view: the blasts go off right in front of the canopy.
+      const eye = this.director.eye;
+      this.deathCenter.set(eye.x, eye.y + 6, eye.z - 0.4);
+      this.deathSpread = 3;
+    } else {
+      this.deathCenter.set(this.player.x, this.player.y, 0);
+      this.deathSpread = 1.4;
+    }
+    this.deathBursts = [0, 0.14, 0.3, 0.5, 0.75];
+    this.deathTime = 0;
+  }
+
+  private updateDeathBursts(dt: number): void {
+    if (this.deathBursts.length === 0) return;
+    this.deathTime += dt;
+    const firstPerson = this.director.blend > 0;
+    while (this.deathBursts.length > 0 && this.deathTime >= this.deathBursts[0]!) {
+      const first = this.deathBursts.shift() === 0;
+      const s = first ? 0 : this.deathSpread;
+      const x = this.deathCenter.x + MathUtils.randFloatSpread(s * 2);
+      const y = this.deathCenter.y + (firstPerson ? MathUtils.randFloatSpread(s) : MathUtils.randFloatSpread(s * 2));
+      const z = this.deathCenter.z + (firstPerson ? MathUtils.randFloatSpread(s * 1.2) : 0.2);
+      const size = first ? 1 : 0.6;
+      this.effects.explode(x, y, PLAYER_COLORS, first ? 90 : 36, (first ? 16 : 10) * size, first ? 1.2 : 0.8, firstPerson ? z : undefined);
+      this.effects.explode(x, y, [0xffe14d, 0xff5a36, 0xffffff], first ? 40 : 16, 7, 0.7, firstPerson ? z : undefined);
+      this.effects.flash(x, y, z, 0xfff1c9, first ? 9 : 5, 0.5);
+      this.effects.ring(x, y, z, 0xffb443, first ? 10 : 5, first ? 0.8 : 0.5, firstPerson);
+      if (first) this.effects.ring(x, y, z, 0x6ff3ff, 6, 0.5, firstPerson);
+      this.blast(tmpVec.set(x, y, z), first ? 1.5 : 0.6);
+      this.shake = Math.max(this.shake, first ? 1.2 : 0.5);
+      if (!first) this.audio.sfx.explosion('big');
+    }
+  }
+
   // --- Enemies, bullets, power-ups -----------------------------------------------------
 
   private popEnemyBullets(): void {
@@ -718,10 +771,10 @@ export class ShooterScene implements GameScene {
     this.enemyBullets.clear();
   }
 
-  private readonly spawnEnemy = (kind: EnemyKind, x: number, yOffset: number, phase: number): void => {
+  private readonly spawnEnemy = (kind: EnemyKind, x: number, yOffset: number, phase: number, delay = 0): void => {
     const difficulty = Math.min(this.time / DIFFICULTY_RAMP_TIME, 1);
     const hpScale = 1 + WAVES.hpGrowthPerWave * (this.spawner.wave - 1);
-    const enemy = new Enemy(kind, x, this.playfield.top + 2 + yOffset, phase, difficulty, hpScale);
+    const enemy = new Enemy(kind, x, this.playfield.top + 2 + yOffset, phase, difficulty, hpScale, delay);
     this.enemies.push(enemy);
     this.scene.add(enemy.object);
   };
@@ -786,7 +839,7 @@ export class ShooterScene implements GameScene {
     let best: Enemy | null = null;
     let bestDist = Infinity;
     for (const e of this.enemies) {
-      if (e.y < y - 1 || e.y > this.playfield.top + 0.5) continue;
+      if (!e.active || e.y < y - 1 || e.y > this.playfield.top + 0.5) continue;
       const d = (e.x - x) ** 2 + (e.y - y) ** 2;
       if (d < bestDist) {
         bestDist = d;
@@ -819,7 +872,7 @@ export class ShooterScene implements GameScene {
       const b = this.playerBullets.items[i]!;
       for (let j = this.enemies.length - 1; j >= 0; j--) {
         const e = this.enemies[j]!;
-        if (!circlesOverlap(b.x, b.y, b.radius, e.x, e.y, e.radius)) continue;
+        if (!e.active || !circlesOverlap(b.x, b.y, b.radius, e.x, e.y, e.radius)) continue;
         this.playerBullets.remove(i);
         this.effects.explode(b.x, b.y + 0.3, [0x7ff6ff, 0xffffff], 3, 5, 0.25);
         if (e.hit(1)) this.killEnemy(j);
@@ -831,7 +884,7 @@ export class ShooterScene implements GameScene {
     // Rockets vs enemies.
     for (let i = this.rockets.count - 1; i >= 0; i--) {
       const r = this.rockets.items[i]!;
-      const j = this.enemies.findIndex((e) => circlesOverlap(r.x, r.y, r.radius, e.x, e.y, e.radius));
+      const j = this.enemies.findIndex((e) => e.active && circlesOverlap(r.x, r.y, r.radius, e.x, e.y, e.radius));
       if (j < 0) continue;
       this.rockets.remove(i);
       this.rocketImpact(r.x, r.y, j);
@@ -850,7 +903,7 @@ export class ShooterScene implements GameScene {
     // Enemies ramming the player.
     for (let j = this.enemies.length - 1; j >= 0; j--) {
       const e = this.enemies[j]!;
-      if (!circlesOverlap(e.x, e.y, e.radius * 0.8, px, py, PLAYER.hitRadius)) continue;
+      if (!e.active || !circlesOverlap(e.x, e.y, e.radius * 0.8, px, py, PLAYER.hitRadius)) continue;
       if (this.invulnerable > 0) continue;
       if (e.hit(6)) this.killEnemy(j);
       this.damagePlayer();
@@ -874,15 +927,15 @@ export class ShooterScene implements GameScene {
   private killEnemy(index: number): void {
     const e = this.enemies[index]!;
     this.score += e.score;
-    const big = e.kind === 'tank';
-    this.effects.explode(e.x, e.y, ENEMY_COLORS[e.kind], big ? 60 : 22, big ? 11 : 8, big ? 0.9 : 0.55);
+    const big = e.kind === 'tank' || e.kind === 'sprayer';
+    this.effects.explode(e.x, e.y, EXPLOSION_COLORS[e.kind], big ? 60 : 22, big ? 11 : 8, big ? 0.9 : 0.55);
     this.effects.ring(e.x, e.y, 0.3, big ? 0xffb443 : 0xff5a36, big ? 8 : 3.2, big ? 0.6 : 0.35);
     if (big) {
       this.shake = Math.max(this.shake, 0.35);
       this.blast(tmpVec.set(e.x, e.y, 0), 1);
     }
     this.audio.sfx.explosion(big ? 'big' : 'small');
-    if (big) this.spawnPowerup(e.x, e.y);
+    if (e.kind === 'tank') this.spawnPowerup(e.x, e.y);
     this.removeEnemyAt(index);
   }
 
@@ -893,7 +946,7 @@ export class ShooterScene implements GameScene {
     const target = this.enemies[hitIndex]!;
     const victims = new Set<Enemy>([target]);
     if (splash > 0) {
-      for (const e of this.enemies) if (circlesOverlap(x, y, splash, e.x, e.y, e.radius)) victims.add(e);
+      for (const e of this.enemies) if (e.active && circlesOverlap(x, y, splash, e.x, e.y, e.radius)) victims.add(e);
     }
     for (const e of victims) {
       const index = this.enemies.indexOf(e);

@@ -1,8 +1,8 @@
 import { MathUtils } from 'three';
-import { createGrunt, createTank, createWeaver, disposeModel } from './models.ts';
+import { createDiver, createGrunt, createSprayer, createSwooper, createTank, createWeaver, disposeModel } from './models.ts';
 import type { Model } from './models.ts';
 
-export type EnemyKind = 'grunt' | 'weaver' | 'tank';
+export type EnemyKind = 'grunt' | 'weaver' | 'tank' | 'diver' | 'sprayer' | 'swooper';
 
 interface EnemyStats {
   hp: number;
@@ -21,6 +21,22 @@ export const ENEMY_STATS: Record<EnemyKind, EnemyStats> = {
   weaver: { hp: 8, radius: 0.75, score: 150, speed: 4.4, fireInterval: [1.4, 2.4], create: createWeaver },
   /** Slow heavy that parks near the top and fires aimed 5-way spreads. Always drops a power-up. */
   tank: { hp: 70, radius: 1.35, score: 600, speed: 2.2, fireInterval: [1.5, 2.1], create: createTank },
+  /** Drops in, locks onto the player (blinking), then dashes straight at where they were. Never shoots. */
+  diver: { hp: 6, radius: 0.75, score: 180, speed: 5, fireInterval: [99, 99], create: createDiver },
+  /** Parks mid-screen and fires rotating rings of shots, then leaves. */
+  sprayer: { hp: 34, radius: 1.2, score: 450, speed: 2.6, fireInterval: [1.7, 2.2], create: createSprayer },
+  /** Sweeps across the screen from one side in a dipping arc, with one aimed shot. */
+  swooper: { hp: 6, radius: 0.8, score: 160, speed: 7, fireInterval: [99, 99], create: createSwooper },
+};
+
+/** Explosion particle colors per kind. */
+export const EXPLOSION_COLORS: Record<EnemyKind, readonly number[]> = {
+  grunt: [0xff5a36, 0xffb443, 0xffffff, 0xff2d55],
+  weaver: [0xff2d55, 0xffb443, 0xffffff],
+  tank: [0xff5a36, 0xffe14d, 0xff2d55, 0xffffff, 0x9fe8ff],
+  diver: [0x57ff9a, 0xb6ffd0, 0xffffff, 0xffe14d],
+  sprayer: [0xc04dff, 0xff5ad8, 0xffffff, 0xffe14d, 0x9fe8ff],
+  swooper: [0xff9a3d, 0xffe14d, 0xffffff, 0xff5a36],
 };
 
 export interface EnemyContext {
@@ -35,6 +51,13 @@ export interface EnemyContext {
 }
 
 const TANK_HOVER_TIME = 7;
+const SPRAYER_HOVER_TIME = 6;
+/** Seconds a diver hangs in place, locked on, before dashing. */
+const DIVER_AIM_TIME = 0.8;
+const DIVER_DASH_SPEED = 17;
+const SPRAYER_SHOTS = 10;
+
+type Motion = 'enter' | 'hover' | 'aim' | 'dash' | 'exit';
 
 export class Enemy {
   readonly model: Model;
@@ -50,8 +73,18 @@ export class Enemy {
   private flashTimer = 0;
   private readonly baseEmissive: number[];
   private prevX: number;
-  private tankState: 'enter' | 'hover' | 'exit' = 'enter';
+  private motion: Motion = 'enter';
   private hoverTime = 0;
+  /** Seconds before it enters play (hidden until then), for staggered formations. */
+  private wait: number;
+  private started = false;
+  private dirX = 0;
+  private dirY = -1;
+  private startX = 0;
+  private startY = 0;
+  private travelled = 0;
+  private shotFired = false;
+  private sprayAngle = 0;
 
   constructor(
     readonly kind: EnemyKind,
@@ -61,6 +94,7 @@ export class Enemy {
     difficulty: number,
     /** Multiplier on base HP (grows with each wave). */
     hpScale = 1,
+    delay = 0,
   ) {
     const stats = ENEMY_STATS[kind];
     this.model = stats.create();
@@ -72,20 +106,33 @@ export class Enemy {
     this.x = baseX;
     this.prevX = baseX;
     this.y = y;
+    this.wait = delay;
     // First shot comes a little later so enemies don't fire the instant they appear.
     this.fireTimer = this.nextFireDelay(difficulty) + 0.6;
     this.model.object.position.set(this.x, this.y, 0);
+    this.model.object.visible = delay <= 0;
   }
 
   get object() {
     return this.model.object;
   }
 
+  /** False while it is still waiting to enter; it can't be hit or collide yet. */
+  get active(): boolean {
+    return this.wait <= 0;
+  }
+
   /** Returns true while the enemy is still in play. */
   update(dt: number, ctx: EnemyContext): boolean {
+    if (this.wait > 0) {
+      this.wait -= dt;
+      if (this.wait > 0) return true;
+      this.model.object.visible = true;
+    }
+    if (!this.started) this.begin(ctx);
     this.age += dt;
     this.prevX = this.x;
-    this.move(dt, ctx);
+    const inPlay = this.move(dt, ctx);
 
     const onScreen = this.y < ctx.top - 0.5;
     this.fireTimer -= dt;
@@ -96,7 +143,7 @@ export class Enemy {
     }
 
     this.animate(dt);
-    return this.y > -ctx.top - 3;
+    return inPlay && this.y > -ctx.top - 3 && Math.abs(this.x) < ctx.halfWidth + 4;
   }
 
   /** Applies damage; returns true if this killed the enemy. */
@@ -110,7 +157,19 @@ export class Enemy {
     disposeModel(this.model);
   }
 
-  private move(dt: number, ctx: EnemyContext): void {
+  private begin(ctx: EnemyContext): void {
+    this.started = true;
+    if (this.kind === 'swooper') {
+      // Enters from the side `baseX` points to, a little below the top edge.
+      const side = Math.sign(this.baseX) || 1;
+      this.startX = side * (ctx.halfWidth + 1.5);
+      this.startY = ctx.top * 0.8 - this.phase;
+      this.x = this.prevX = this.startX;
+      this.y = this.startY;
+    }
+  }
+
+  private move(dt: number, ctx: EnemyContext): boolean {
     const limit = ctx.halfWidth - this.radius;
     switch (this.kind) {
       case 'grunt':
@@ -121,44 +180,98 @@ export class Enemy {
         this.y -= this.speed * dt;
         this.x = MathUtils.clamp(this.baseX + Math.sin(this.age * 2.4 + this.phase) * 2.6, -limit, limit);
         break;
-      case 'tank': {
-        const hoverY = ctx.top * 0.45;
-        if (this.tankState === 'enter') {
+      case 'tank':
+      case 'sprayer': {
+        const hoverY = ctx.top * (this.kind === 'tank' ? 0.45 : 0.4);
+        if (this.motion === 'enter') {
           this.y -= this.speed * dt;
-          if (this.y <= hoverY) this.tankState = 'hover';
-        } else if (this.tankState === 'hover') {
+          if (this.y <= hoverY) this.motion = 'hover';
+        } else if (this.motion === 'hover') {
           this.hoverTime += dt;
           this.y = MathUtils.damp(this.y, hoverY, 2, dt);
-          if (this.hoverTime > TANK_HOVER_TIME) this.tankState = 'exit';
+          if (this.hoverTime > (this.kind === 'tank' ? TANK_HOVER_TIME : SPRAYER_HOVER_TIME)) this.motion = 'exit';
         } else {
           this.y -= this.speed * 1.4 * dt;
         }
-        this.x = MathUtils.clamp(this.baseX + Math.sin(this.hoverTime * 0.9 + this.phase) * 3, -limit, limit);
+        const sway = this.kind === 'tank' ? 3 : 1.5;
+        this.x = MathUtils.clamp(this.baseX + Math.sin(this.hoverTime * 0.9 + this.phase) * sway, -limit, limit);
         break;
       }
+      case 'diver': {
+        const aimY = ctx.top * (0.55 - 0.08 * Math.abs(this.phase));
+        if (this.motion === 'enter') {
+          this.y = Math.max(aimY, this.y - this.speed * 1.6 * dt);
+          if (this.y <= aimY) this.motion = 'aim';
+        } else if (this.motion === 'aim') {
+          this.hoverTime += dt;
+          const dx = ctx.playerX - this.x;
+          const dy = ctx.playerY - this.y;
+          const len = Math.hypot(dx, dy) || 1;
+          this.dirX = dx / len;
+          this.dirY = dy / len;
+          if (this.hoverTime > DIVER_AIM_TIME) this.motion = 'dash';
+        } else {
+          const speed = DIVER_DASH_SPEED * MathUtils.lerp(1, 1.2, ctx.difficulty);
+          this.x += this.dirX * speed * dt;
+          this.y += this.dirY * speed * dt;
+        }
+        break;
+      }
+      case 'swooper': {
+        const width = 2 * Math.abs(this.startX);
+        this.travelled += this.speed * dt;
+        const t = this.travelled / width;
+        this.x = this.startX - Math.sign(this.startX) * this.travelled;
+        this.y = this.startY - Math.sin(Math.min(t, 1) * Math.PI) * ctx.top * 0.45;
+        if (!this.shotFired && t > 0.3) {
+          this.shotFired = true;
+          if (this.y > ctx.playerY + 2.5) this.aimedShot(ctx, 1);
+        }
+        return t < 1;
+      }
     }
+    return true;
   }
 
   private shoot(ctx: EnemyContext): void {
     const speed = ctx.bulletSpeed;
     const muzzleY = this.y - this.radius * 0.8;
-    if (this.kind === 'weaver') {
-      ctx.fire(this.x, muzzleY, 0, -speed);
-      return;
+    switch (this.kind) {
+      case 'weaver':
+        ctx.fire(this.x, muzzleY, 0, -speed);
+        return;
+      case 'grunt':
+        this.aimedShot(ctx, 1);
+        return;
+      case 'sprayer': {
+        if (this.motion !== 'hover') return;
+        this.sprayAngle += Math.PI / SPRAYER_SHOTS;
+        const ringSpeed = speed * 0.7;
+        for (let i = 0; i < SPRAYER_SHOTS; i++) {
+          const a = this.sprayAngle + (i / SPRAYER_SHOTS) * Math.PI * 2;
+          ctx.fire(this.x, this.y, Math.cos(a) * ringSpeed, Math.sin(a) * ringSpeed);
+        }
+        return;
+      }
+      case 'tank': {
+        const aim = Math.atan2(ctx.playerY - muzzleY, ctx.playerX - this.x);
+        const spread = MathUtils.degToRad(14);
+        const tankSpeed = speed * 0.85;
+        for (let i = -2; i <= 2; i++) {
+          const a = aim + i * spread;
+          ctx.fire(this.x, muzzleY, Math.cos(a) * tankSpeed, Math.sin(a) * tankSpeed);
+        }
+        return;
+      }
+      default:
     }
+  }
 
+  private aimedShot(ctx: EnemyContext, speedScale: number): void {
+    const muzzleY = this.y - this.radius * 0.8;
     const aim = Math.atan2(ctx.playerY - muzzleY, ctx.playerX - this.x);
-    if (this.kind === 'grunt') {
-      ctx.fire(this.x, muzzleY, Math.cos(aim) * speed, Math.sin(aim) * speed);
-      return;
-    }
-
-    const spread = MathUtils.degToRad(14);
-    const tankSpeed = speed * 0.85;
-    for (let i = -2; i <= 2; i++) {
-      const a = aim + i * spread;
-      ctx.fire(this.x, muzzleY, Math.cos(a) * tankSpeed, Math.sin(a) * tankSpeed);
-    }
+    const speed = ctx.bulletSpeed * speedScale;
+    ctx.fire(this.x, muzzleY, Math.cos(aim) * speed, Math.sin(aim) * speed);
   }
 
   private animate(dt: number): void {
@@ -169,14 +282,24 @@ export class Enemy {
     const vx = dt > 0 ? (this.x - this.prevX) / dt : 0;
     obj.rotation.y = MathUtils.damp(obj.rotation.y, MathUtils.clamp(-vx * 0.2, -0.8, 0.8), 8, dt);
     if (this.kind === 'grunt') obj.rotation.x = Math.sin(this.age * 2 + this.phase) * 0.15;
-
-    if (this.flashTimer > 0) {
-      this.flashTimer -= dt;
-      const flashing = this.flashTimer > 0;
-      this.model.flashMaterials.forEach((m, i) => {
-        m.emissive.setHex(flashing ? 0xffffff : this.baseEmissive[i]!);
-      });
+    if (this.kind === 'sprayer') obj.rotation.z += dt * (this.motion === 'hover' ? 1.6 : 0.4);
+    if (this.kind === 'diver' && this.motion !== 'enter') {
+      // Nose (-y) toward the locked-on direction.
+      const target = Math.atan2(this.dirY, this.dirX) + Math.PI / 2;
+      obj.rotation.z = MathUtils.damp(obj.rotation.z, target, 14, dt);
     }
+    if (this.kind === 'swooper') {
+      const t = this.travelled / (2 * Math.abs(this.startX) || 1);
+      obj.rotation.z = Math.sign(this.startX) * Math.cos(Math.min(t, 1) * Math.PI) * -0.6;
+    }
+
+    // A locked-on diver blinks as a warning before it dashes.
+    const warning = this.kind === 'diver' && this.motion === 'aim' && Math.floor(this.hoverTime * 12) % 2 === 0;
+    if (this.flashTimer > 0) this.flashTimer -= dt;
+    const flashing = this.flashTimer > 0 || warning;
+    this.model.flashMaterials.forEach((m, i) => {
+      m.emissive.setHex(flashing ? (warning && this.flashTimer <= 0 ? 0x57ff9a : 0xffffff) : this.baseEmissive[i]!);
+    });
   }
 
   private nextFireDelay(difficulty: number): number {

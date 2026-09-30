@@ -27,7 +27,7 @@ import { createGlowMaterial, glowGeometry } from './glow.ts';
  * Geometries are shared; materials are per-instance where they need to flash on hit.
  */
 
-type ShipId = 'player' | 'grunt' | 'weaver' | 'tank';
+type ShipId = 'player' | 'grunt' | 'weaver' | 'tank' | 'diver' | 'sprayer' | 'swooper';
 
 interface ShipSource {
   mesh: string;
@@ -43,6 +43,9 @@ const SHIP_SOURCES: Record<ShipId, ShipSource> = {
   grunt: { mesh: 'bob.glb', texture: 'bob_red.jpg', span: 2.1, facesDown: true },
   weaver: { mesh: 'dispatcher.glb', texture: 'dispatcher_red.jpg', span: 2.2, facesDown: true },
   tank: { mesh: 'pancake.glb', texture: 'pancake_red.jpg', span: 3.6, facesDown: true },
+  diver: { mesh: 'striker.glb', texture: 'striker_green.jpg', span: 2, facesDown: true },
+  sprayer: { mesh: 'omen.glb', texture: 'omen_purple.jpg', span: 3.2, facesDown: true },
+  swooper: { mesh: 'spitfire.glb', texture: 'spitfire_orange.jpg', span: 2.2, facesDown: true },
 };
 
 interface ShipAsset {
@@ -281,6 +284,27 @@ export function createTank(): Model {
   object.add(mesh(geometries.cannon, metal, 0.7, -1.1, 0));
   object.add(mesh(geometries.eye, new MeshBasicMaterial({ color: 0xffe14d }), 0, -0.2, 0.75));
   return { object, flashMaterials: [hull, metal] };
+}
+
+/** Slim green lancer that lines up and dives at the player. */
+export function createDiver(): Model {
+  return texturedEnemy('diver', 0.8) ?? tinted(createWeaver(), 0x57e389);
+}
+
+/** Purple gunship that parks and sprays rotating rings of shots. */
+export function createSprayer(): Model {
+  return texturedEnemy('sprayer', 1.3) ?? tinted(createTank(), 0xc04dff, 0.75);
+}
+
+/** Orange wide-wing fighter that sweeps across the screen in an arc. */
+export function createSwooper(): Model {
+  return texturedEnemy('swooper', 0.9) ?? tinted(createGrunt(), 0xff9a3d);
+}
+
+function tinted(model: Model, color: number, scale = 1): Model {
+  for (const m of model.flashMaterials) m.color.setHex(color);
+  model.object.scale.setScalar(scale);
+  return model;
 }
 
 export type PowerupKind = 'laser' | 'rocket';

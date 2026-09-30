@@ -2,9 +2,9 @@ import { MathUtils } from 'three';
 import { WAVES } from './constants.ts';
 import type { EnemyKind } from './Enemy.ts';
 
-export type SpawnFn = (kind: EnemyKind, x: number, yOffset: number, phase: number) => void;
+export type SpawnFn = (kind: EnemyKind, x: number, yOffset: number, phase: number, delay?: number) => void;
 
-type Formation = 'line' | 'snake' | 'vee' | 'tank';
+type Formation = 'line' | 'snake' | 'vee' | 'tank' | 'swoop' | 'dive' | 'spray' | 'pincer';
 
 interface FormationRule {
   formation: Formation;
@@ -16,7 +16,11 @@ interface FormationRule {
 const RULES: readonly FormationRule[] = [
   { formation: 'line', from: 0, weight: 3 },
   { formation: 'snake', from: 8, weight: 2 },
+  { formation: 'swoop', from: 12, weight: 2 },
+  { formation: 'dive', from: 24, weight: 2 },
   { formation: 'vee', from: 40, weight: 2 },
+  { formation: 'spray', from: 55, weight: 1 },
+  { formation: 'pincer', from: 70, weight: 1 },
 ];
 
 /**
@@ -79,6 +83,41 @@ export class WaveSpawner {
       case 'vee': {
         const cx = MathUtils.randFloat(-span * 0.3, span * 0.3);
         for (let i = -2; i <= 2; i++) spawn('grunt', cx + i * 1.8, Math.abs(i) * 1.2, i);
+        break;
+      }
+      case 'swoop': {
+        // A train of fighters arcing across from one side.
+        const side = Math.random() < 0.5 ? -1 : 1;
+        const n = MathUtils.randInt(4, difficulty > 0.5 ? 6 : 5);
+        const row = MathUtils.randFloat(0, 2);
+        for (let i = 0; i < n; i++) spawn('swooper', side, 0, row, i * 0.32);
+        this.timer += 0.6;
+        break;
+      }
+      case 'dive': {
+        // Divers drop in, lock on one after another, then dash at the player.
+        const n = difficulty > 0.5 ? 3 : 2;
+        for (let i = 0; i < n; i++) {
+          const x = MathUtils.lerp(-span, span, i / (n - 1)) * 0.7;
+          spawn('diver', x, 0, i % 2, i * 0.45);
+        }
+        this.timer += 0.8;
+        break;
+      }
+      case 'spray': {
+        spawn('sprayer', MathUtils.randFloat(-span * 0.3, span * 0.3), 0, Math.random() * Math.PI * 2);
+        spawn('weaver', -span * 0.7, 2, 0, 1.2);
+        spawn('weaver', span * 0.7, 2, Math.PI, 1.2);
+        this.timer += 2.5;
+        break;
+      }
+      case 'pincer': {
+        // Swoopers from both sides at once, crossing in the middle.
+        for (let i = 0; i < 3; i++) {
+          spawn('swooper', -1, 0, 0.4, i * 0.35);
+          spawn('swooper', 1, 0, 2.2, i * 0.35);
+        }
+        this.timer += 1;
         break;
       }
       case 'tank': {
