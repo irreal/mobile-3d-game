@@ -113,8 +113,8 @@ const GRADE_LABEL: Record<Exclude<Grade, 'call'>, string> = {
 };
 /**
  * Call rhythms per bar in 8th notes ('x' = an enemy calls), by difficulty level. The
- * level rises with each strike and again halfway through a strike. Calls stay within the
- * first three beats: the fourth is the count-in to the response.
+ * level rises with each strike and again halfway through a strike. Calls stay early in the
+ * bar so there is a clear gap before the response.
  */
 const PATTERNS: readonly (readonly string[])[] = [
   ['x...x...', 'x.x.x...', 'x.x.....', 'x...xx..'],
@@ -122,12 +122,12 @@ const PATTERNS: readonly (readonly string[])[] = [
   ['x.xxx...', 'xx.x.x..', 'x.x.xx..', 'x..xxx..', 'xx.xx...'],
   ['x.xxxx..', 'xx.xxx..', 'xxx.xx..', 'xxxx.x..', 'x.xxx.x.'],
 ];
-/** Beat (from the phrase start) where the swoosh ends: one count-in beat before the first reply. */
-const CUE_BEAT = 3;
-/** Beats from a call to its reply: the response bar follows the call bar directly. */
-const RESPONSE_OFFSET = 4;
-/** Beats per phrase: call bar, response bar, then a rest bar before the next call. */
-const PHRASE_BEATS = 12;
+/** Beats from a call to its reply: a pause of a bar and a half after the call starts. */
+const RESPONSE_OFFSET = 6;
+/** Beat (from the phrase start) where the swoosh ends: right on the first reply. */
+const CUE_BEAT = RESPONSE_OFFSET;
+/** Beats per phrase: call, pause, response, then a rest before the next call (bar aligned). */
+const PHRASE_BEATS = 16;
 /** After taking a hit, at least this many beats pass before the next phrase (on a bar line). */
 const HIT_PAUSE_BEATS = 7;
 /** Hits a heavy takes; it stays and joins one call per phrase until destroyed. */
@@ -879,7 +879,7 @@ export class CockpitSection {
         n.sr = screen.r;
         // Targets get their numbered circle once their call is done and the reply is near.
         const until = n.beat - this.beat;
-        if (!n.called || this.beat < p.start + CUE_BEAT) continue;
+        if (!n.called || this.beat < p.start + RESPONSE_OFFSET - COCKPIT.approachBeats) continue;
         const isNext = n === next;
         this.markers.push({
           x: screen.x,

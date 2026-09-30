@@ -75,13 +75,12 @@ phrases of three bars (call bar, response bar, then a rest bar):
   first three beats of the bar. Each warp
   flash lands on the beat with its own tone (climbing the current chord), and a number pops up to
   show its place in the sequence.
-- **REPEAT (response bar):** tap the enemies back **in the same order and rhythm**, one bar later.
-  Each target shows its number, the next one is highlighted and a ring closes on it over the last
+- **REPEAT (response):** tap the enemies back **in the same order and rhythm**, six beats after
+  the call (a bar and a half). Each target shows its number, the next one is highlighted and a ring closes on it over the last
   beat. The bar at the bottom shows the call (hollow) and the reply (solid) scrolling toward the
   hit line; the indicator at the top shows WATCH/REPEAT and the beat within the bar. The switch
-  to your turn is marked by a riser over the third beat of the call ending in a chime, a gold
-  flash and REPEAT on the fourth beat: count that beat ("1") while the first ring closes, then
-  start tapping on the next downbeat. During strikes the music is ducked slightly so calls and taps stand out.
+  to your turn is marked by a one-beat swoosh that cuts off exactly on your first tap, together
+  with a gold flash and REPEAT. During strikes the music is ducked slightly so calls and taps stand out.
 - Timing is judged against what you *hear* (the audio clock, corrected for output latency) using
   the touch event's own timestamp: **PERFECT** within ±70 ms, **GREAT** ±130 ms, **GOOD** ±200 ms.
   Tapping a target far too early is a MISS, so spamming doesn't work.

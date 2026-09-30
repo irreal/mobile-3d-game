@@ -239,8 +239,7 @@ export class Sfx {
     const start = riseStart ?? now;
     const hit = time ?? now;
     const rise = Math.max(0.05, hit - start);
-    // Audible for the whole lead-in beat and cut off right on the downbeat, so it reads as
-    // "count-in, then 1" rather than landing on the first tap.
+    // Builds over the lead-in beat and cuts off exactly on the first reply.
     this.a.noise({
       time: start,
       duration: rise,
@@ -262,9 +261,6 @@ export class Sfx {
       release: 0.015,
       filter: { type: 'lowpass', freq: 1200, to: 5000 },
     });
-    this.a.tone({ type: 'square', freq: 880, to: 1760, time: hit, duration: 0.12, gain: 0.1, filter: { type: 'lowpass', freq: 6000 } });
-    this.a.tone({ type: 'triangle', freq: 1760, time: hit + 0.06, duration: 0.3, gain: 0.14 });
-    this.a.noise({ time: hit, duration: 0.45, gain: 0.16, filter: { type: 'highpass', freq: 6000 } });
   }
 
   /** Cockpit shield absorbs return fire. */
