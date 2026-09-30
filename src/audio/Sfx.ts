@@ -360,4 +360,14 @@ export class Sfx {
     this.a.noise({ duration: 0.5, gain: 0.14, attack: 0.05, filter: { type: 'bandpass', freq: 400, to: 2400, q: 1.2 } });
     this.a.tone({ type: 'square', freq: 200, to: 500, duration: 0.3, gain: 0.04, filter: { type: 'lowpass', freq: 1500 } });
   }
+
+  /** New gun locks onto the hull (upgrade close-up). */
+  install(): void {
+    const t = this.a.now;
+    this.a.noise({ duration: 0.12, gain: 0.25, filter: { type: 'bandpass', freq: 2200, q: 2 } });
+    this.a.tone({ type: 'square', freq: 180, to: 90, duration: 0.15, gain: 0.08, filter: { type: 'lowpass', freq: 1200 } });
+    [0, 7, 12, 19].forEach((semi, i) => {
+      this.a.tone({ type: 'triangle', freq: 660 * 2 ** (semi / 12), time: t + 0.12 + i * 0.07, duration: 0.3, gain: 0.08 });
+    });
+  }
 }

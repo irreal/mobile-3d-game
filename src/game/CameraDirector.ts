@@ -14,6 +14,16 @@ const ROLL_AXIS = new Vector3(0, 0, 1);
 const roll = new Quaternion();
 const sway = new Quaternion();
 const swayEuler = new Euler();
+/** Upgrade close-up: behind and above the ship, looking down its spine at the hull. */
+const FOCUS_OFFSET = new Vector3(0, -4.6, 5.6);
+const FOCUS_TILT = 0.69;
+const FOCUS_FOV = 50;
+const VICTORY_FOV = 52;
+const focusQuat = new Quaternion();
+const focusEuler = new Euler();
+const target = new Vector3();
+const upA = new Vector3(0, 1, 0);
+const upB = new Vector3(0, 0, 1);
 const a = new Vector3();
 const b = new Vector3();
 const c = new Vector3();
@@ -30,6 +40,12 @@ export class CameraDirector {
   private progress = 0;
   private time = 0;
   readonly eye = new Vector3();
+  /** 0..1 upgrade close-up (shmup view only). */
+  focus = 0;
+  /** Orbit angle around the ship during the close-up. */
+  focusAngle = 0;
+  /** Seconds into the victory fly-by, or -1. */
+  victory = -1;
 
   get inCockpit(): boolean {
     return this.blend >= 1 && this.direction === 0;
@@ -41,6 +57,7 @@ export class CameraDirector {
 
   /** 0..1 amount for cinematic letterbox bars: peaks mid-transition. */
   get letterbox(): number {
+    if (this.victory >= 0) return Math.min(1, this.victory / 1.5);
     if (this.direction === 0) return 0;
     const p = this.progress;
     return Math.min(1, Math.min(p, 1 - p) * 5);
@@ -61,6 +78,8 @@ export class CameraDirector {
   reset(): void {
     this.direction = 0;
     this.blend = 0;
+    this.focus = 0;
+    this.victory = -1;
   }
 
   update(
@@ -104,10 +123,44 @@ export class CameraDirector {
     camera.position.y += (Math.random() - 0.5) * s * MathUtils.lerp(1.2, 0.1, t);
     camera.position.z += (Math.random() - 0.5) * s * MathUtils.lerp(0, 0.25, t);
 
-    const fov = MathUtils.lerp(PLAYFIELD.fov, COCKPIT.fov, t);
+    let fov = MathUtils.lerp(PLAYFIELD.fov, COCKPIT.fov, t);
+    if (this.victory >= 0) {
+      fov = this.victoryPose(camera, cameraDistance, shipX, shipY);
+    } else if (this.focus > 0) {
+      const f = easeInOutCubic(Math.min(1, this.focus));
+      a.copy(FOCUS_OFFSET).applyAxisAngle(ROLL_AXIS, this.focusAngle).add(target.set(shipX, shipY, 0));
+      camera.position.lerp(a, f);
+      focusQuat.setFromEuler(focusEuler.set(FOCUS_TILT, 0, this.focusAngle, 'ZXY'));
+      camera.quaternion.slerp(focusQuat, f);
+      fov = MathUtils.lerp(fov, FOCUS_FOV, f);
+    }
     if (camera.fov !== fov) {
       camera.fov = fov;
       camera.updateProjectionMatrix();
     }
+  }
+
+  /**
+   * Victory fly-by: from the top-down view the camera sweeps down and around to hang in front
+   * of the ship, looking back at it (and the worlds behind it) as it flies toward the lens.
+   */
+  private victoryPose(camera: PerspectiveCamera, cameraDistance: number, shipX: number, shipY: number): number {
+    const v = this.victory;
+    const k = easeInOutCubic(Math.min(1, v / 4.5));
+    const close = MathUtils.smoothstep(v, 4.5, 14);
+    a.set(0, 0, cameraDistance);
+    b.set(shipX + 10, shipY + 3, 7);
+    c.set(shipX + 1.3 + Math.sin(v * 0.4) * 0.3, shipY + 7.5 - close * 2.2, 1.25 + Math.sin(v * 0.6) * 0.15);
+    const u = 1 - k;
+    camera.position
+      .set(0, 0, 0)
+      .addScaledVector(a, u * u)
+      .addScaledVector(b, 2 * u * k)
+      .addScaledVector(c, k * k);
+    target.set(0, 0, 0).lerp(c.set(shipX, shipY - 1.2, 0.9), k);
+    camera.up.lerpVectors(upA, upB, k).normalize();
+    camera.lookAt(target);
+    camera.up.set(0, 1, 0);
+    return MathUtils.lerp(PLAYFIELD.fov, VICTORY_FOV, k);
   }
 }

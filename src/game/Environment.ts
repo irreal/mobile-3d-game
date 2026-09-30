@@ -15,6 +15,7 @@ import {
 } from 'three';
 import type { Camera, Texture } from 'three';
 import { Planet } from './Planet.ts';
+import type { PlanetLook } from './Planet.ts';
 
 export type EnvironmentId = 'space' | 'desert' | 'ocean' | 'lava';
 
@@ -345,6 +346,19 @@ interface Cloud {
   speed: number;
 }
 
+function planetLook(id: Exclude<EnvironmentId, 'space'>): PlanetLook {
+  const p = PALETTES[id];
+  return { low: p.low, mid: p.mid, high: p.high, sea: p.sea, seaLevel: p.seaLevel, seaGlow: p.seaGlow, atmosphere: p.skyHorizon };
+}
+
+/** The worlds behind the ship in the ending, most recent (nearest) first. */
+const VICTORY_PLANETS: readonly { id: Exclude<EnvironmentId, 'space'>; offset: Vector3; radius: number; delay: number }[] = [
+  { id: 'lava', offset: new Vector3(-3, -62, 4), radius: 5.5, delay: 0 },
+  { id: 'ocean', offset: new Vector3(10, -112, 24), radius: 7, delay: 0.5 },
+  { id: 'desert', offset: new Vector3(-5, -166, 52), radius: 8, delay: 1 },
+];
+const tmpPos = new Vector3();
+
 /** After leaving a planet it shrinks away behind the ship over this long. */
 const DEPART_SECONDS = 12;
 /** Planet size at which the ship hits the atmosphere (fills the view). */
@@ -377,6 +391,9 @@ export class Environment {
   private approach = 0;
   private departed: Exclude<EnvironmentId, 'space'> | null = null;
   private departTime = Infinity;
+  private victoryPlanets: Planet[] | null = null;
+  private readonly victoryAnchor = new Vector3();
+  private victoryTime = -1;
   private readonly terrain: Mesh;
   private readonly terrainMaterial: ShaderMaterial;
   private readonly sky: Mesh;
@@ -619,11 +636,42 @@ export class Environment {
       opacity = this.planetFade;
     }
     if (look && look !== this.planetLook) {
-      const p = PALETTES[look];
-      this.planet.setLook({ low: p.low, mid: p.mid, high: p.high, sea: p.sea, seaLevel: p.seaLevel, seaGlow: p.seaGlow, atmosphere: p.skyHorizon });
+      this.planet.setLook(planetLook(look));
       this.planetLook = look;
     }
+    if (this.victoryTime >= 0) opacity = 0;
     this.planet.update(dt, camera.position, cockpitBlend, size, screenY, look ? opacity : 0);
+    this.updateVictory(dt);
+  }
+
+  /** Shows every world visited, hanging in space behind (−y of) the ship at (x, y). */
+  startVictory(x: number, y: number): void {
+    if (!this.victoryPlanets) {
+      const sun = new Vector3(0.35, 0.8, 0.5).normalize();
+      this.victoryPlanets = VICTORY_PLANETS.map(({ id }) => {
+        const planet = new Planet(sun);
+        planet.setLook(planetLook(id));
+        this.object.add(planet.object);
+        return planet;
+      });
+    }
+    this.victoryAnchor.set(x, y, 0);
+    this.victoryTime = 0;
+  }
+
+  stopVictory(): void {
+    this.victoryTime = -1;
+    for (const p of this.victoryPlanets ?? []) p.object.visible = false;
+  }
+
+  private updateVictory(dt: number): void {
+    if (this.victoryTime < 0 || !this.victoryPlanets) return;
+    this.victoryTime += dt;
+    VICTORY_PLANETS.forEach(({ offset, radius, delay }, i) => {
+      const opacity = MathUtils.smoothstep(this.victoryTime, 1 + delay, 3 + delay);
+      tmpPos.copy(this.victoryAnchor).add(offset);
+      this.victoryPlanets![i]!.place(dt, tmpPos, radius, opacity);
+    });
   }
 
   private approachScreenY(size: number): number {
@@ -633,6 +681,7 @@ export class Environment {
 
   dispose(): void {
     this.planet.dispose();
+    for (const p of this.victoryPlanets ?? []) p.dispose();
     this.terrain.geometry.dispose();
     this.terrainMaterial.dispose();
     this.sky.geometry.dispose();

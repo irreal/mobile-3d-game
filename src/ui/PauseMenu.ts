@@ -14,6 +14,8 @@ export interface PauseMenuActions {
   jumpToCockpit: (strike: number) => void;
   /** Testing shortcut: jump to the alien base fight on planet N (1-based). */
   jumpToBase: (planet: number) => void;
+  /** Testing shortcut: play the ending. */
+  jumpToVictory: () => void;
   /** Testing: read / set weapon levels (clamped by the game); `set` returns the new level. */
   weaponLevel: (weapon: Weapon) => { level: number; max: number };
   setWeaponLevel: (weapon: Weapon, level: number) => number;
@@ -71,7 +73,7 @@ export class PauseMenu {
       this.effectsButton,
       this.tutorialButton,
       testRow(actions.jumpToCockpit),
-      baseTestRow(actions.jumpToBase),
+      baseTestRow(actions.jumpToBase, actions.jumpToVictory),
       this.weaponRow('Laser', 'laser', actions),
       this.weaponRow('Rockets', 'rocket', actions),
       replyDelayRow(),
@@ -165,7 +167,7 @@ function testRow(jump: (strike: number) => void): HTMLDivElement {
 }
 
 /** Buttons that jump straight to each planet's alien base fight. */
-function baseTestRow(jump: (planet: number) => void): HTMLDivElement {
+function baseTestRow(jump: (planet: number) => void, ending: () => void): HTMLDivElement {
   const row = document.createElement('div');
   row.className = 'menu-row';
   const label = document.createElement('span');
@@ -176,6 +178,9 @@ function baseTestRow(jump: (planet: number) => void): HTMLDivElement {
     b.classList.add('small');
     row.append(b);
   });
+  const end = menuButton('End', ending);
+  end.classList.add('small');
+  row.append(end);
   return row;
 }
 

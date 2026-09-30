@@ -197,6 +197,18 @@ export class Planet {
     this.object.scale.setScalar(radius);
   }
 
+  /** Fixed placement in the world (the victory backdrop) instead of following the camera. */
+  place(dt: number, position: Vector3, radius: number, opacity: number): void {
+    this.object.visible = opacity > 0.001;
+    if (!this.object.visible) return;
+    this.spin += dt * 0.03;
+    this.surface.uniforms.uSpin!.value = this.spin;
+    this.surface.uniforms.uOpacity!.value = opacity;
+    this.halo.uniforms.uOpacity!.value = opacity;
+    this.object.position.copy(position);
+    this.object.scale.setScalar(radius);
+  }
+
   dispose(): void {
     for (const child of this.object.children) (child as Mesh).geometry.dispose();
     this.surface.dispose();

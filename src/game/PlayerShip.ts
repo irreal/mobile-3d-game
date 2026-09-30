@@ -1,16 +1,22 @@
 import { MathUtils } from 'three';
 import { createPlayerShip } from './models.ts';
 import type { PlayerModel } from './models.ts';
+import { ShipWeapons } from './ShipWeapons.ts';
 
 /** Visual state of the player's ship; movement rules live in the scene. */
 export class PlayerShip {
   readonly model: PlayerModel = createPlayerShip();
+  readonly weapons = new ShipWeapons();
   x = 0;
   y = 0;
   /** Blown up (game over): stays hidden until placed again. */
   destroyed = false;
   private prevX = 0;
   private time = 0;
+
+  constructor() {
+    this.model.object.add(this.weapons.object);
+  }
 
   get object() {
     return this.model.object;

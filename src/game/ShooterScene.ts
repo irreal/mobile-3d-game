@@ -54,7 +54,7 @@ import { Starfield } from './Starfield.ts';
 import { WarpField } from './WarpField.ts';
 import { WaveSpawner } from './WaveSpawner.ts';
 
-type State = 'title' | 'playing' | 'gameover';
+type State = 'title' | 'playing' | 'gameover' | 'victory';
 
 export interface GameUi {
   /** Element that DOM overlays (menus, tutorials) are added to. */
@@ -107,6 +107,15 @@ const MAX_ROCKET = ROCKET_LEVELS.length - 1;
 const ROCKET_COLOR = new Color(0xffd08a).multiplyScalar(1.2);
 
 const GAMEOVER_INPUT_DELAY = 1.2;
+
+/** Upgrade close-up timeline (real seconds): zoom in, hold (part installs), zoom out. */
+const UPGRADE_IN = 0.45;
+const UPGRADE_HOLD_END = 1.8;
+const UPGRADE_OUT = 0.6;
+const UPGRADE_TIME_SCALE = 0.06;
+/** Victory: when the "mission complete" card appears, and when a tap restarts. */
+const VICTORY_MESSAGE_AT = 4;
+const VICTORY_INPUT_AT = 7;
 
 export class ShooterScene implements GameScene {
   readonly scene = new Scene();
@@ -187,6 +196,15 @@ export class ShooterScene implements GameScene {
   private bossBursts: number[] = [];
   /** Scroll speed multiplier: brakes to 0 at the alien base. */
   private scrollFactor = 1;
+  /** Game-time multiplier (slow motion during the upgrade close-up). */
+  private timeScale = 1;
+  /** Real seconds into the upgrade close-up, or -1. */
+  private upgradeTime = -1;
+  private upgradeInstalled = false;
+  /** Weapon levels currently mounted on the hull model. */
+  private shownWeapons = '';
+  private victoryTime = 0;
+  private victoryMessageShown = false;
   private readonly hud: Hud;
   private readonly cockpitOverlay: CockpitOverlay;
   private readonly pauseMenu: PauseMenu;
@@ -219,6 +237,7 @@ export class ShooterScene implements GameScene {
         },
         jumpToCockpit: (strike) => this.jumpToCockpit(strike),
         jumpToBase: (planet) => this.jumpToBase(planet),
+        jumpToVictory: () => this.jumpToVictory(),
         weaponLevel: (weapon) =>
           weapon === 'laser'
             ? { level: this.laserLevel, max: MAX_LASER }
@@ -316,12 +335,16 @@ export class ShooterScene implements GameScene {
       this.updateHud();
       return;
     }
-    const dt = realDt;
+    this.updateUpgradeCinematic(realDt);
+    const dt = realDt * this.timeScale;
     this.stateTime += dt;
 
     const playing = this.state === 'playing';
     if (playing) {
-      this.updatePhase(realDt);
+      this.updatePhase(dt);
+    } else if (this.state === 'victory') {
+      this.input.consumeDrag(this.drag);
+      this.updateVictory(dt);
     } else {
       this.input.consumeDrag(this.drag);
       if (this.state === 'gameover' && !this.gameOverShown && this.stateTime > GAMEOVER_INPUT_DELAY) {
@@ -337,13 +360,17 @@ export class ShooterScene implements GameScene {
     if (playing && this.phase !== 'toCockpit' && this.phase !== 'cockpit') this.checkCollisions();
 
     this.invulnerable = Math.max(0, this.invulnerable - dt);
-    this.player.sync(dt, this.invulnerable);
+    this.player.sync(dt, this.upgradeTime >= 0 ? 0 : this.invulnerable);
+    if (this.state === 'victory') this.animateVictoryShip();
+    this.syncWeapons();
+    this.player.weapons.update(realDt);
     this.updateEnginePlume(dt);
     this.updateDeathBursts(dt);
     this.effects.update(dt, this.camera);
     const blend = this.director.blend;
     this.cockpitFill.intensity = 2.6 * blend;
-    const scrollSpeed = (playing ? MathUtils.lerp(14, 30, blend) : 5) * this.scrollFactor;
+    const cruise = this.state === 'victory' ? 28 : playing ? MathUtils.lerp(14, 30, blend) : 5;
+    const scrollSpeed = cruise * this.scrollFactor;
     this.starfield.update(dt, scrollSpeed);
     this.environment.setApproach(upcomingPlanet(this.spawner.wave), this.planetApproach());
     this.environment.update(dt, this.camera, scrollSpeed, blend);
@@ -458,7 +485,8 @@ export class ShooterScene implements GameScene {
         this.input.consumeDrag(this.drag);
         if (!this.director.transitioning) {
           this.cockpit.clear();
-          this.startNextWave();
+          if (this.isFinalWave) this.startVictory();
+          else this.startNextWave();
         }
         break;
     }
@@ -528,6 +556,120 @@ export class ShooterScene implements GameScene {
     const inPair = (this.spawner.wave - 1) % 2;
     if (this.phase === 'shmup' || this.phase === 'waveClear') return ((inPair + this.spawner.progress) / 2) * 0.7;
     return 0.75;
+  }
+
+  /** The strike after the last world's base ends the run. */
+  private get isFinalWave(): boolean {
+    return this.isStrikeWave && environmentForWave(this.spawner.wave) === 'lava';
+  }
+
+  // --- Upgrade close-up ------------------------------------------------------------------
+
+  private startUpgradeCinematic(): void {
+    if (this.director.blend > 0 || this.state !== 'playing' || this.upgradeTime >= 0) {
+      this.syncWeapons(true);
+      return;
+    }
+    this.upgradeTime = 0;
+    this.upgradeInstalled = false;
+    this.audio.music.setCutoff(700, 0.3);
+  }
+
+  private updateUpgradeCinematic(realDt: number): void {
+    if (this.upgradeTime < 0) {
+      this.timeScale = 1;
+      return;
+    }
+    const t = (this.upgradeTime += realDt);
+    const out = Math.min(1, Math.max(0, (t - UPGRADE_HOLD_END) / UPGRADE_OUT));
+    this.timeScale =
+      t < UPGRADE_IN ? MathUtils.lerp(1, UPGRADE_TIME_SCALE, t / UPGRADE_IN) : MathUtils.lerp(UPGRADE_TIME_SCALE, 1, out * out);
+    this.director.focus = t < UPGRADE_IN ? t / UPGRADE_IN : 1 - out;
+    this.director.focusAngle = MathUtils.lerp(-0.45, 0.35, Math.min(1, t / (UPGRADE_HOLD_END + UPGRADE_OUT)));
+    if (!this.upgradeInstalled && t >= UPGRADE_IN * 0.85) {
+      this.upgradeInstalled = true;
+      this.syncWeapons(true);
+      this.audio.sfx.install();
+    }
+    if (t >= UPGRADE_HOLD_END + UPGRADE_OUT) {
+      this.upgradeTime = -1;
+      this.timeScale = 1;
+      this.director.focus = 0;
+      this.audio.music.setCutoff(this.musicCutoff, 0.4);
+    }
+  }
+
+  /** Mounts the hull guns for the current levels (animated for the close-up). */
+  private syncWeapons(animate = false): void {
+    if (this.upgradeTime >= 0 && !this.upgradeInstalled) return;
+    const key = `${this.laserLevel}/${this.rocketLevel}`;
+    if (key === this.shownWeapons) return;
+    this.shownWeapons = key;
+    this.player.weapons.set(this.laserLevel, this.rocketLevel, animate);
+  }
+
+  private cancelUpgradeCinematic(): void {
+    this.upgradeTime = -1;
+    this.timeScale = 1;
+    this.director.focus = 0;
+  }
+
+  // --- Victory ---------------------------------------------------------------------------
+
+  private startVictory(): void {
+    this.cancelUpgradeCinematic();
+    this.state = 'victory';
+    this.stateTime = 0;
+    this.victoryTime = 0;
+    this.victoryMessageShown = false;
+    this.hud.hideMessage();
+    this.messageTimer = 0;
+    this.popEnemyBullets();
+    this.director.victory = 0;
+    this.environment.startVictory(this.player.x, this.player.y);
+    this.audio.music.play(NOVA_DRIVE, 1);
+    this.audio.engine.setMusicLevel(MUSIC_LEVEL, 1);
+    this.setMusicCutoff(20000, 2);
+    if (this.score > this.hiScore) {
+      this.hiScore = this.score;
+      saveHiScore(this.hiScore);
+    }
+  }
+
+  private updateVictory(dt: number): void {
+    this.victoryTime += dt;
+    this.director.victory = this.victoryTime;
+    if (!this.victoryMessageShown && this.victoryTime > VICTORY_MESSAGE_AT) {
+      this.victoryMessageShown = true;
+      this.audio.sfx.squadronCleared();
+      this.hud.showMessage('MISSION COMPLETE', `Three worlds freed\nScore ${this.score.toLocaleString('en-US')}`);
+    }
+    if (this.victoryMessageShown && this.stateTime > VICTORY_INPUT_AT && this.stateTime - dt <= VICTORY_INPUT_AT) {
+      const action = isTouchDevice() ? 'Tap to play again' : 'Click or press Space to play again';
+      this.hud.showMessage('MISSION COMPLETE', `Three worlds freed\nScore ${this.score.toLocaleString('en-US')}\n${action}`);
+    }
+  }
+
+  /** Cruising toward the camera with a gentle bob and one victory roll. */
+  private animateVictoryShip(): void {
+    const v = this.victoryTime;
+    const obj = this.player.object;
+    obj.position.z = Math.sin(v * 1.4) * 0.12;
+    const roll = MathUtils.smoothstep(v, 5.2, 6.6);
+    if (roll > 0 && roll < 1) obj.rotation.y = roll * Math.PI * 2;
+    obj.rotation.x = Math.sin(v * 0.9) * 0.05;
+  }
+
+  /** Testing shortcut (pause menu): play the ending. */
+  private jumpToVictory(): void {
+    this.closePause();
+    this.tutorial.cancel();
+    this.clearWorld();
+    this.cockpit.clear();
+    this.director.reset();
+    this.environment.set('space');
+    this.placePlayerAtStart();
+    this.startVictory();
   }
 
   /** The last wave on a planet ends at an alien base. */
@@ -821,6 +963,7 @@ export class ShooterScene implements GameScene {
     if (this.paused) return;
     if (this.state === 'title') this.startGame();
     else if (this.state === 'gameover' && this.stateTime > GAMEOVER_INPUT_DELAY) this.startGame();
+    else if (this.state === 'victory' && this.stateTime > VICTORY_INPUT_AT) this.startGame();
   };
 
   private enterTitle(): void {
@@ -892,6 +1035,9 @@ export class ShooterScene implements GameScene {
     this.deathBursts = [];
     this.removeBase();
     this.scrollFactor = 1;
+    this.cancelUpgradeCinematic();
+    this.environment.stopVictory();
+    this.player.object.position.z = 0;
   }
 
   // --- Player --------------------------------------------------------------------------
@@ -1185,7 +1331,7 @@ export class ShooterScene implements GameScene {
       const p = this.powerups[i]!;
       if (!circlesOverlap(p.x, p.y, 0.45, px, py, PLAYER.pickupRadius)) continue;
       this.audio.sfx.powerup();
-      this.applyPowerup(p.kind);
+      if (this.applyPowerup(p.kind)) this.startUpgradeCinematic();
       this.effects.explode(p.x, p.y, [POWERUP_COLORS[p.kind], 0xffffff], 16, 6, 0.4);
       this.effects.ring(p.x, p.y, 0.2, POWERUP_COLORS[p.kind], 3.5, 0.4);
       navigator.vibrate?.(20);
@@ -1240,19 +1386,22 @@ export class ShooterScene implements GameScene {
     return preferred;
   }
 
-  private applyPowerup(kind: PowerupKind): void {
+  /** Returns true if a weapon was upgraded (not just points for a maxed one). */
+  private applyPowerup(kind: PowerupKind): boolean {
     if (kind === 'laser' && this.laserLevel < MAX_LASER) {
       this.laserLevel++;
       this.flashMessage('LASER UP', `Level ${this.laserLevel}/${MAX_LASER}`, 1.1);
+      return true;
     } else if (kind === 'rocket' && this.rocketLevel < MAX_ROCKET) {
       this.rocketLevel++;
       const extra = ROCKET_LEVELS[this.rocketLevel]!;
       const note = this.rocketLevel === 1 ? 'Rockets online' : extra.splash > 0 ? 'Splash damage' : extra.homing ? 'Homing' : '';
       this.flashMessage('ROCKETS UP', `Level ${this.rocketLevel}/${MAX_ROCKET}${note ? ` · ${note}` : ''}`, 1.1);
-    } else {
-      this.score += POWERUP.maxedScore;
-      this.flashMessage('MAXED', `+${POWERUP.maxedScore}`, 0.9);
+      return true;
     }
+    this.score += POWERUP.maxedScore;
+    this.flashMessage('MAXED', `+${POWERUP.maxedScore}`, 0.9);
+    return false;
   }
 
   private removeEnemyAt(index: number): void {

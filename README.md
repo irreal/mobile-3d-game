@@ -65,6 +65,10 @@ won't work over plain-HTTP LAN; use the deployed GitHub Pages site to test those
   - **Sprayer** (purple): parks mid-screen, spins and fires rotating rings of shots, then leaves.
 - Formations unlock over time: lines, snakes, swoops, dives, vees, sprayers with escorts and pincers.
 - Difficulty (spawn rate, bullet speed, fire rate, formations) ramps up over about 2.5 minutes.
+- **Upgrades on the hull:** every laser barrel (one per shot, at its offset and angle) and rocket
+  pod is mounted on the ship model (`ShipWeapons.ts`). Collecting an upgrade slows time almost to a
+  stop, zooms in behind the ship while the new gun grows onto the hull with a flash, then zooms
+  back out and play continues.
 
 ### Environments
 
@@ -84,6 +88,12 @@ exposed). Two hangars keep launching pairs of fighters. Destroying the core blow
 base in a chain of explosions (and everything it launched), pays a bonus, and the wreck scrolls
 away as the flight resumes into the cockpit strike. *Base test* in the pause menu jumps straight
 to each planet's base.
+
+**Ending:** after the molten world's base and cockpit strike, the ship climbs back to space and
+the run ends in a victory fly-by: the camera sweeps down and around in front of the ship as it
+cruises toward the lens (with a victory roll), and the three worlds hang behind it at increasing
+distance. *MISSION COMPLETE* shows the final score; tap to play again. *End* in the pause
+menu's Base test row plays it directly.
 
 Planets are drawn by `Environment.ts` (and `Planet.ts` for the globe seen from space): a sky dome, a procedural heightfield terrain scrolling below the playfield
 (mesas, islands in a sea, or rock over glowing lava, with fog toward the horizon) and drifting
