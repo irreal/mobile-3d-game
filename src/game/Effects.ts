@@ -22,10 +22,10 @@ const ringGeometry = new RingGeometry(0.82, 1, 48);
  * chunky debris, and expanding shock rings for big blasts. Each pool is one draw call.
  */
 export class Effects {
-  readonly sparks = new InstancedPool(glowGeometry, createGlowMaterial({ size: 1, intensity: 1.6 }), 900, true);
+  readonly sparks = new InstancedPool(glowGeometry, createGlowMaterial({ size: 1, intensity: 1.2 }), 900, true);
   readonly flashes = new InstancedPool(
     glowGeometry,
-    createGlowMaterial({ size: 1, intensity: 1.1, core: 0.45 }),
+    createGlowMaterial({ size: 1, intensity: 0.8, core: 0.4 }),
     48,
     true,
   );
@@ -93,7 +93,7 @@ export class Effects {
       blending: AdditiveBlending,
       depthWrite: false,
     });
-    material.color.multiplyScalar(1.6);
+    material.color.multiplyScalar(1.15);
     const mesh = new Mesh(ringGeometry, material);
     mesh.position.set(x, y, z);
     mesh.scale.setScalar(0.01);

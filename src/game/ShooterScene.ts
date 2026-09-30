@@ -100,11 +100,11 @@ interface Powerup {
 }
 
 const PLAYER_COLORS = [0xdfe7ff, 0x3b7bff, 0x6ff3ff, 0xffa040];
-const PLAYER_BULLET_COLOR = new Color(0x7ff6ff).multiplyScalar(1.25);
+const PLAYER_BULLET_COLOR = new Color(0x7ff6ff).multiplyScalar(1.05);
 
 const MAX_LASER = LASER_LEVELS.length - 1;
 const MAX_ROCKET = ROCKET_LEVELS.length - 1;
-const ROCKET_COLOR = new Color(0xffd08a).multiplyScalar(1.5);
+const ROCKET_COLOR = new Color(0xffd08a).multiplyScalar(1.2);
 
 const GAMEOVER_INPUT_DELAY = 1.2;
 
@@ -125,7 +125,7 @@ export class ShooterScene implements GameScene {
   );
   private readonly enemyBullets = new InstancedPool(
     glowGeometry,
-    createGlowMaterial({ size: 1.05, intensity: 1.6, core: 0.4, color: [1, 0.3, 0.55] }),
+    createGlowMaterial({ size: 1, intensity: 1.35, core: 0.4, color: [1, 0.3, 0.55] }),
     400,
   );
   private readonly rockets = new InstancedPool(
@@ -219,6 +219,14 @@ export class ShooterScene implements GameScene {
         },
         jumpToCockpit: (strike) => this.jumpToCockpit(strike),
         jumpToBase: (planet) => this.jumpToBase(planet),
+        weaponLevel: (weapon) =>
+          weapon === 'laser'
+            ? { level: this.laserLevel, max: MAX_LASER }
+            : { level: this.rocketLevel, max: MAX_ROCKET },
+        setWeaponLevel: (weapon, level) => {
+          if (weapon === 'laser') return (this.laserLevel = MathUtils.clamp(level, 1, MAX_LASER));
+          return (this.rocketLevel = MathUtils.clamp(level, 0, MAX_ROCKET));
+        },
         toggleSound: () => audio.engine.toggleMuted(),
         toggleEffects: () => {
           fx.setQuality(fx.quality === 'high' ? 'low' : 'high');
@@ -516,7 +524,7 @@ export class ShooterScene implements GameScene {
 
   /** How close the next planet looms while in space: grows over the pair of waves before it. */
   private planetApproach(): number {
-    if (this.state === 'title' || this.spawner.wave === 0) return 0.45;
+    if (this.state === 'title' || this.spawner.wave === 0) return 0;
     const inPair = (this.spawner.wave - 1) % 2;
     if (this.phase === 'shmup' || this.phase === 'waveClear') return ((inPair + this.spawner.progress) / 2) * 0.7;
     return 0.75;

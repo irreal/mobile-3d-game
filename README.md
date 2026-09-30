@@ -146,6 +146,8 @@ phrases of three bars (call bar, response bar, then a rest bar):
 - **Pause** with the pause button (bottom-right, during play), Esc or P. The game also pauses when
   the tab/app goes to the background. The menu has Resume, Restart, Sound on/off, Effects
   High/Low, Show tutorials again, and Quit to title.
+- **Testing rows** (pause menu): *Base test* jumps to each planet's alien base, and *Laser* /
+  *Rockets* steppers set the weapon levels directly.
 - **Cockpit test** (pause menu, for testing): buttons 1–5 jump straight into that cockpit strike
   level of the current game (the fly-in plays, then the squadron for that strike).
 - Dying blows the ship up in a chain of explosions and it stays gone for the game-over screen; in

@@ -85,7 +85,7 @@ export const WAVES = {
   formationsPerWave: 2,
   maxFormations: 18,
   /** Enemy HP grows by this fraction of base HP each wave. */
-  hpGrowthPerWave: 0.15,
+  hpGrowthPerWave: 0.24,
   /**
    * Heavies come on a fixed schedule: at these fractions of the wave's formations.
    * Waves before `twoTanksFromWave` get only the first one.

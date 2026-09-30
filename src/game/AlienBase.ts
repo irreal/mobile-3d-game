@@ -62,7 +62,7 @@ function metal(color = METAL): MeshStandardMaterial {
   return new MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.55, flatShading: true });
 }
 
-function glow(color: number, intensity = 1.6): MeshStandardMaterial {
+function glow(color: number, intensity = 1.1): MeshStandardMaterial {
   return new MeshStandardMaterial({ color: 0x111111, emissive: color, emissiveIntensity: intensity, roughness: 0.4 });
 }
 
@@ -95,7 +95,7 @@ export function createCore(): Model {
   const crystal = new MeshStandardMaterial({
     color: 0x2a1030,
     emissive: MAGENTA,
-    emissiveIntensity: 1.6,
+    emissiveIntensity: 1.2,
     roughness: 0.2,
     metalness: 0.3,
     flatShading: true,
@@ -142,9 +142,9 @@ export class AlienBase {
   constructor(groundZ: number) {
     const hull = this.track(metal());
     const dark = this.track(metal(0x241f33));
-    const trim = this.track(glow(TEAL, 1.2));
-    const hot = this.track(glow(MAGENTA, 1.6));
-    const amber = this.track(glow(0xffa040, 1.8));
+    const trim = this.track(glow(TEAL, 0.8));
+    const hot = this.track(glow(MAGENTA, 1.1));
+    const amber = this.track(glow(0xffa040, 1.2));
     this.glows.push(trim, hot, amber);
 
     const top = groundZ + 1.4;
@@ -207,7 +207,7 @@ export class AlienBase {
       const light = this.track(glow(i % 2 ? MAGENTA : TEAL, 2));
       const beacon = new Mesh(geo.beacon, light);
       beacon.position.set(x, y, top + 3.1);
-      this.blinkers.push({ material: light, phase: i * 0.9, base: 2 });
+      this.blinkers.push({ material: light, phase: i * 0.9, base: 1.4 });
       this.object.add(spike, beacon);
     }
   }

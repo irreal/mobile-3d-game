@@ -214,7 +214,7 @@ export class CockpitSection {
   private readonly rockets: Rocket[] = [];
   private readonly markers: NoteMarker[] = [];
   private readonly lane: LaneNote[] = [];
-  private readonly boltMaterial = createGlowMaterial({ size: 1.5, intensity: 1.8, core: 0.35, color: [1, 0.3, 0.55] });
+  private readonly boltMaterial = createGlowMaterial({ size: 1.4, intensity: 1.45, core: 0.35, color: [1, 0.3, 0.55] });
   private readonly rocketMaterial = new MeshBasicMaterial({ color: new Color(0xfff1c9).multiplyScalar(1.4) });
   private readonly goldMaterial = new MeshBasicMaterial({ color: new Color(0xffd23d).multiplyScalar(1.8) });
   private readonly beams: Beam[] = [];

@@ -130,7 +130,7 @@ export class PostFx {
     const target = new WebGLRenderTarget(1, 1, { type: HalfFloatType, samples: 4 });
     this.composer = new EffectComposer(renderer, target);
     this.composer.addPass(new RenderPass(scene, camera));
-    this.bloom = new UnrealBloomPass(new Vector2(256, 256), 0.35, 0.3, 0.95);
+    this.bloom = new UnrealBloomPass(new Vector2(256, 256), 0.22, 0.25, 1.05);
     this.composer.addPass(this.bloom);
     this.final = new ShaderPass(FinalShader);
     this.composer.addPass(this.final);

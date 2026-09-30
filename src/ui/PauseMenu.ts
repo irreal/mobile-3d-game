@@ -13,7 +13,12 @@ export interface PauseMenuActions {
   jumpToCockpit: (strike: number) => void;
   /** Testing shortcut: jump to the alien base fight on planet N (1-based). */
   jumpToBase: (planet: number) => void;
+  /** Testing: read / set weapon levels (clamped by the game); `set` returns the new level. */
+  weaponLevel: (weapon: Weapon) => { level: number; max: number };
+  setWeaponLevel: (weapon: Weapon, level: number) => number;
 }
+
+export type Weapon = 'laser' | 'rocket';
 
 const TEST_STRIKES = 5;
 
@@ -24,6 +29,7 @@ export class PauseMenu {
   private readonly soundButton: HTMLButtonElement;
   private readonly effectsButton: HTMLButtonElement;
   private readonly tutorialButton: HTMLButtonElement;
+  private readonly weaponRows: (() => void)[] = [];
   private open = false;
 
   constructor(overlay: HTMLElement, actions: PauseMenuActions, muted: boolean, effects: 'high' | 'low') {
@@ -62,6 +68,8 @@ export class PauseMenu {
       this.tutorialButton,
       testRow(actions.jumpToCockpit),
       baseTestRow(actions.jumpToBase),
+      this.weaponRow('Laser', 'laser', actions),
+      this.weaponRow('Rockets', 'rocket', actions),
       replyDelayRow(),
       menuButton('Quit to title', actions.quit),
       credits(),
@@ -86,6 +94,30 @@ export class PauseMenu {
     this.modal.hidden = false;
     this.tutorialButton.textContent = 'Show tutorials again';
     this.tutorialButton.disabled = false;
+    for (const render of this.weaponRows) render();
+  }
+
+  /** Stepper for a weapon level (testing). */
+  private weaponRow(name: string, weapon: Weapon, actions: PauseMenuActions): HTMLDivElement {
+    const row = document.createElement('div');
+    row.className = 'menu-row';
+    const label = document.createElement('span');
+    const render = (): void => {
+      const { level, max } = actions.weaponLevel(weapon);
+      label.textContent = `${name}: ${level}/${max}`;
+    };
+    const step = (by: number) => () => {
+      actions.setWeaponLevel(weapon, actions.weaponLevel(weapon).level + by);
+      render();
+    };
+    const minus = menuButton('−', step(-1));
+    const plus = menuButton('+', step(1));
+    minus.classList.add('small');
+    plus.classList.add('small');
+    row.append(label, minus, plus);
+    this.weaponRows.push(render);
+    render();
+    return row;
   }
 
   hide(): void {

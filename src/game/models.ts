@@ -115,8 +115,8 @@ function shipMaterial(asset: ShipAsset): MeshStandardMaterial {
 }
 
 const engineGlowMaterials = {
-  player: createGlowMaterial({ size: 1.3, intensity: 1.5, color: [1, 0.55, 0.2] }),
-  enemy: createGlowMaterial({ size: 0.75, intensity: 1.2, color: [1, 0.25, 0.35] }),
+  player: createGlowMaterial({ size: 1.2, intensity: 1.15, color: [1, 0.55, 0.2] }),
+  enemy: createGlowMaterial({ size: 0.7, intensity: 0.85, color: [1, 0.25, 0.35] }),
 };
 
 const sharedMaterials = new Set<Material>(Object.values(engineGlowMaterials));
@@ -312,8 +312,8 @@ export type PowerupKind = 'laser' | 'rocket';
 export const POWERUP_COLORS: Record<PowerupKind, number> = { laser: 0x6ff3ff, rocket: 0xffa040 };
 
 const powerupGlows: Record<PowerupKind, Material> = {
-  laser: createGlowMaterial({ size: 2.4, intensity: 1, core: 0.15, color: [0.45, 0.95, 1] }),
-  rocket: createGlowMaterial({ size: 2.4, intensity: 1, core: 0.15, color: [1, 0.6, 0.25] }),
+  laser: createGlowMaterial({ size: 2, intensity: 0.8, core: 0.15, color: [0.45, 0.95, 1] }),
+  rocket: createGlowMaterial({ size: 2, intensity: 0.8, core: 0.15, color: [1, 0.6, 0.25] }),
 };
 for (const m of Object.values(powerupGlows)) sharedMaterials.add(m);
 
