@@ -73,6 +73,12 @@ export class Nebula {
     this.mesh.renderOrder = -10;
   }
 
+  /** Fades the nebula out (e.g. inside a planet's atmosphere); 1 is full. */
+  setIntensity(intensity: number): void {
+    this.material.uniforms.uIntensity!.value = intensity;
+    this.mesh.visible = intensity > 0.001;
+  }
+
   update(dt: number, camera: Camera, speed: number): void {
     this.scroll += dt * speed * 0.004;
     this.material.uniforms.uScroll!.value = this.scroll;

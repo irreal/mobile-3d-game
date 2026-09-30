@@ -40,6 +40,8 @@ import {
 import { Effects } from './Effects.ts';
 import { createGlowMaterial, glowGeometry } from './glow.ts';
 import { Enemy, EXPLOSION_COLORS } from './Enemy.ts';
+import { Environment, environmentForWave } from './Environment.ts';
+import type { EnvironmentId } from './Environment.ts';
 import type { EnemyContext, EnemyKind } from './Enemy.ts';
 import { InstancedPool } from './InstancedPool.ts';
 import { createPowerup, disposeModel, POWERUP_COLORS, sharedGeometries } from './models.ts';
@@ -95,6 +97,7 @@ export class ShooterScene implements GameScene {
   private readonly playfield = new Playfield();
   private readonly starfield = new Starfield();
   private readonly nebula = new Nebula();
+  private readonly environment: Environment;
   private readonly effects = new Effects(this.scene);
   private readonly spawner = new WaveSpawner();
   private readonly player = new PlayerShip();
@@ -171,6 +174,7 @@ export class ShooterScene implements GameScene {
     this.hud = ui.hud;
     this.cockpitOverlay = ui.cockpit;
     const cockpitOverlay = ui.cockpit;
+    this.environment = new Environment(ui.container);
     this.tutorial = new TutorialOverlay(ui.container);
     this.pauseMenu = new PauseMenu(
       ui.container,
@@ -218,7 +222,7 @@ export class ShooterScene implements GameScene {
     this.scene.add(this.nebula.mesh);
     for (const layer of this.starfield.layers) this.scene.add(layer.points);
     this.scene.add(this.player.object, this.playerBullets.mesh, this.enemyBullets.mesh, this.rockets.mesh);
-    this.scene.add(this.warp.object, this.interior.object);
+    this.scene.add(this.warp.object, this.interior.object, this.environment.object);
     cockpitOverlay.setInterior(this.interior.available);
 
     this.cockpit = new CockpitSection(this.scene, this.effects, cockpitOverlay, audio.sfx, audio.music, {
@@ -301,7 +305,11 @@ export class ShooterScene implements GameScene {
     this.effects.update(dt, this.camera);
     const blend = this.director.blend;
     this.cockpitFill.intensity = 2.6 * blend;
-    this.starfield.update(dt, playing ? MathUtils.lerp(14, 30, blend) : 5);
+    const scrollSpeed = playing ? MathUtils.lerp(14, 30, blend) : 5;
+    this.starfield.update(dt, scrollSpeed);
+    this.environment.update(dt, this.camera, scrollSpeed);
+    this.starfield.setAtmosphere(this.environment.atmosphere);
+    this.nebula.setIntensity(1 - this.environment.atmosphere);
     this.warp.update(dt, blend, this.player.x, this.player.y, 45);
     this.playerBullets.sync();
     this.rockets.sync();
@@ -381,6 +389,7 @@ export class ShooterScene implements GameScene {
           this.setPhase('toShmup');
           this.director.exitCockpit();
           this.audio.sfx.flyOut(COCKPIT.exitDuration);
+          this.changeEnvironment(environmentForWave(this.spawner.wave + 1));
           this.setMusicCutoff(500, COCKPIT.exitDuration * 0.5);
         }
         break;
@@ -416,8 +425,21 @@ export class ShooterScene implements GameScene {
     this.messageTimer = 0;
     this.invulnerable = 1;
     this.spawner.wave = strike * COCKPIT.everyWaves;
+    this.environment.set(environmentForWave(this.spawner.wave));
     this.placePlayerAtStart();
     this.enterCockpit();
+  }
+
+  /** Flies into the next world while the camera pulls out of the cockpit. */
+  private changeEnvironment(next: EnvironmentId): void {
+    const env = this.environment;
+    const from = env.id;
+    if (next === from) return;
+    const seconds = COCKPIT.exitDuration + 0.6;
+    env.transitionTo(next, seconds);
+    this.audio.sfx.atmosphere(seconds);
+    const title = from === 'space' ? 'ENTERING ATMOSPHERE' : next === 'space' ? 'LEAVING ATMOSPHERE' : 'HYPERJUMP';
+    this.flashMessage(title, next === 'space' ? 'Back to deep space' : env.nameOf(next), seconds);
   }
 
   private get isStrikeWave(): boolean {
@@ -476,7 +498,7 @@ export class ShooterScene implements GameScene {
     this.audio.music.play(NOVA_DRIVE, 0.8);
     this.audio.engine.setMusicLevel(MUSIC_LEVEL, 1);
     this.setMusicCutoff(20000, 1.2);
-    this.flashMessage(`WAVE ${this.spawner.wave}`, '', 1.4);
+    this.flashMessage(`WAVE ${this.spawner.wave}`, this.environment.nameOf(this.environment.id), 1.4);
   }
 
   private setMusicCutoff(hz: number, seconds: number): void {
@@ -510,6 +532,7 @@ export class ShooterScene implements GameScene {
     this.clearWorld();
     this.cockpit.clear();
     this.director.reset();
+    this.environment.set('space');
     this.audio.music.stop(0.8);
     this.audio.engine.setMusicLevel(MUSIC_LEVEL, 1);
     this.messageTimer = 0;
@@ -541,6 +564,7 @@ export class ShooterScene implements GameScene {
     this.enemyBullets.dispose();
     this.effects.dispose();
     this.nebula.dispose();
+    this.environment.dispose();
     disposeModel(this.player.model);
   }
 
@@ -579,6 +603,7 @@ export class ShooterScene implements GameScene {
     this.drops = 0;
     this.invulnerable = 1;
     this.spawner.reset();
+    this.environment.set(environmentForWave(1));
     this.director.reset();
     this.cockpit.clear();
     this.cockpitTutorialDone = false;

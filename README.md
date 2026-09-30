@@ -66,6 +66,18 @@ won't work over plain-HTTP LAN; use the deployed GitHub Pages site to test those
 - Formations unlock over time: lines, snakes, swoops, dives, vees, sprayers with escorts and pincers.
 - Difficulty (spawn rate, bullet speed, fire rate, formations) ramps up over about 2.5 minutes.
 
+### Environments
+
+Every cockpit strike ends by flying into a new world, which lasts for the next two waves: deep
+space (waves 1–2), then the desert planet **Kharan** (3–4), the ocean world **Thalassa** (5–6) and
+the molten world **Vulcan** (7–8), then back to space and around again. Entering or leaving an
+atmosphere plays a rumble with a cloud/heat veil while the camera pulls out of the cockpit.
+Planets are drawn by `Environment.ts`: a sky dome, a procedural heightfield terrain scrolling below the playfield
+(mesas, islands in a sea, or rock over glowing lava, with fog toward the horizon) and drifting
+clouds; stars and the nebula fade out while inside an atmosphere. Everything is generated in
+shaders, so there are no extra asset downloads. The cockpit test in the pause menu starts in the
+world of that strike (level 2 is the desert).
+
 ### Cockpit strikes (between waves)
 
 Each wave is a fixed number of formations, and enemy HP grows each wave. After every second wave

@@ -142,6 +142,23 @@ export class Sfx {
   }
 
   /** Falling whoosh for the fly-out. */
+  /** Atmospheric entry (or exit): a deep rumble and rushing wind that swell and fade. */
+  atmosphere(duration: number): void {
+    this.a.noise({
+      duration,
+      gain: 0.35,
+      attack: duration * 0.45,
+      filter: { type: 'lowpass', freq: 180, to: 90, q: 0.8 },
+    });
+    this.a.noise({
+      duration: duration * 0.9,
+      gain: 0.16,
+      attack: duration * 0.4,
+      filter: { type: 'bandpass', freq: 500, to: 1800, q: 0.7 },
+    });
+    this.a.tone({ type: 'sawtooth', freq: 42, to: 30, duration, gain: 0.08, attack: duration * 0.4, filter: { type: 'lowpass', freq: 160 } });
+  }
+
   flyOut(duration: number): void {
     this.a.noise({
       duration,

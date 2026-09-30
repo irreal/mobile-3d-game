@@ -1294,3 +1294,14 @@ body {
   color: rgb(200 215 255 / 55%);
   text-align: center;
 }
+
+/* Cloud / heat veil while entering or leaving a planet's atmosphere. */
+.env-veil {
+  --veil: 255, 255, 255;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    radial-gradient(ellipse at 50% 55%, rgb(var(--veil) / 55%) 0%, rgb(var(--veil) / 85%) 55%, rgb(var(--veil) / 95%) 100%);
+}

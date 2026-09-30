@@ -64,6 +64,19 @@ export class Starfield {
     }
   }
 
+  /**
+   * 0 in space; 1 inside an atmosphere, where the deep layers (below the terrain) vanish and
+   * the nearest one stays on faintly as dust.
+   */
+  setAtmosphere(amount: number): void {
+    this.layers.forEach((layer, i) => {
+      const material = layer.points.material as PointsMaterial;
+      const last = i === this.layers.length - 1;
+      material.opacity = last ? 1 - amount * 0.6 : 1 - amount;
+      layer.points.visible = material.opacity > 0.01;
+    });
+  }
+
   /** `speed` is the scroll speed of the nearest layer in world units per second. */
   update(dt: number, speed: number): void {
     for (const layer of this.layers) {
