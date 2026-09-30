@@ -69,17 +69,17 @@ roll) into the cockpit. The HUD powers on (flicker, scan line, boot text), then 
 squadron drops out of warp right in front of you and you fight it in first person:
 
 The fight is a **call-and-response rhythm game locked to the cockpit music** (146 BPM), in
-phrases of three bars (call bar, one count-in beat, response bar, then a short rest):
+phrases of three bars (call bar, response bar, then a rest bar):
 
 - **WATCH (call bar):** enemies drop out of warp one at a time on an 8th-note rhythm. Each warp
   flash lands on the beat with its own tone (climbing the current chord), and a number pops up to
   show its place in the sequence.
-- **REPEAT (response bar):** after one count-in beat, tap the enemies back **in the same order and
-  rhythm** (each reply comes 5 beats after its call). Each target shows its number, the next one is
-  highlighted and a ring closes on it over the last beat. The bar at the bottom shows the call (hollow) and the reply (solid) scrolling toward the
+- **REPEAT (response bar):** tap the enemies back **in the same order and rhythm**, one bar later.
+  Each target shows its number, the next one is highlighted and a ring closes on it over the last
+  beat. The bar at the bottom shows the call (hollow) and the reply (solid) scrolling toward the
   hit line; the indicator at the top shows WATCH/REPEAT and the beat within the bar. The switch
   to your turn is marked by a riser over the last beat of the call ending in a chime and a gold
-  flash; count one beat from there and start tapping. During strikes the music is ducked slightly so calls and taps stand out.
+  flash on the downbeat, which is your first tap. During strikes the music is ducked slightly so calls and taps stand out.
 - Timing is judged against what you *hear* (the audio clock, corrected for output latency) using
   the touch event's own timestamp: **PERFECT** within ±70 ms, **GREAT** ±130 ms, **GOOD** ±200 ms.
   Tapping a target far too early is a MISS, so spamming doesn't work.

@@ -54,7 +54,7 @@ interface Note {
   onScreen: boolean;
 }
 
-/** The call bar from `start`, a count-in beat, the response, then a short rest (PHRASE_BEATS in all). */
+/** The call bar from `start`, the response bar, then a rest (PHRASE_BEATS in all). */
 interface Phrase {
   start: number;
   notes: Note[];
@@ -121,9 +121,9 @@ const PATTERNS: readonly (readonly string[])[] = [
   ['x.x.x.x.', 'x.xx.x..', 'xx.x.x..', 'x.x.xx..', 'x..xx.x.'],
   ['x.xxx.x.', 'xx.xx.x.', 'x.x.xxx.', 'xxx.x.x.', 'x.xx.xx.'],
 ];
-/** Beats from a call to its reply: the call bar plus one count-in beat. */
-const RESPONSE_OFFSET = 5;
-/** Beats per phrase: call bar, count-in, response bar, then a rest before the next call. */
+/** Beats from a call to its reply: the response bar follows the call bar directly. */
+const RESPONSE_OFFSET = 4;
+/** Beats per phrase: call bar, response bar, then a rest bar before the next call. */
 const PHRASE_BEATS = 12;
 /** After taking a hit, at least this many beats pass before the next phrase (on a bar line). */
 const HIT_PAUSE_BEATS = 7;
@@ -876,7 +876,7 @@ export class CockpitSection {
         n.sr = screen.r;
         // Targets get their numbered circle once their call is done and the reply is near.
         const until = n.beat - this.beat;
-        if (!n.called || this.beat < p.start + 4) continue;
+        if (!n.called || this.beat < p.start + RESPONSE_OFFSET - 0.5) continue;
         const isNext = n === next;
         this.markers.push({
           x: screen.x,
@@ -898,7 +898,6 @@ export class CockpitSection {
     const current = this.phrases.find((p) => this.beat >= p.start && this.beat < p.start + RESPONSE_OFFSET + 4);
     const inPhrase = current ? this.beat - current.start : 0;
     const mode: PhraseMode = !current ? null : inPhrase < 4 ? 'watch' : 'repeat';
-    // No pips during the count-in beat between call and response.
     const pip = inPhrase < 4 ? Math.floor(inPhrase) : Math.floor(inPhrase - RESPONSE_OFFSET);
     this.overlay.setPhase(mode, pip);
     this.overlay.setHintVisible(frame.active && this.phraseCount <= 2 && this.strike <= 1);
