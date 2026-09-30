@@ -15,13 +15,28 @@ function commitHash(): string {
   }
 }
 
+const commit = commitHash();
+
 // Served as a GitHub Pages project site: https://irreal.github.io/mobile-3d-game/
 export default defineConfig({
   base: '/mobile-3d-game/',
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
-    __APP_COMMIT__: JSON.stringify(commitHash()),
+    __APP_COMMIT__: JSON.stringify(commit),
   },
+  plugins: [
+    {
+      // Lets the running game check whether a newer build is live ("Check for update").
+      name: 'version-json',
+      generateBundle() {
+        this.emitFile({
+          type: 'asset',
+          fileName: 'version.json',
+          source: JSON.stringify({ version: pkg.version, commit }),
+        });
+      },
+    },
+  ],
   server: {
     port: 5173,
   },

@@ -156,6 +156,9 @@ phrases of three bars (call bar, response bar, then a rest bar):
   first time you enter the cockpit in each game. From the third time a card is shown, it offers
   a *Don't show again* checkbox. Show counts and opt-outs are stored in `localStorage`
   (`nova-strike:tutorial:*`). *Show tutorials again* in the pause menu clears them.
+- **Check for update:** tap the version label (bottom-left, also on the title screen) or *Check for
+  update* in the pause menu. It fetches `version.json` (written by the build) bypassing the cache and
+  says whether a newer build is live; tap again to reload, skipping the cached page.
 - **Version:** bottom-left shows `v<package.json version> · <commit>`. Both are injected at build
   time by `vite.config.ts` (the commit comes from `GITHUB_SHA` in CI, or `git` locally). Bump
   `version` in `package.json` for releases.

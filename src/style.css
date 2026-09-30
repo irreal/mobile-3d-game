@@ -975,11 +975,18 @@ body {
 
 .hud-version {
   position: absolute;
-  left: calc(env(safe-area-inset-left) + 10px);
-  bottom: calc(env(safe-area-inset-bottom) + 6px);
+  left: calc(env(safe-area-inset-left) + 2px);
+  bottom: calc(env(safe-area-inset-bottom) + 0px);
+  padding: 8px 10px 6px 8px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
   font-size: 10px;
   letter-spacing: 0.06em;
-  opacity: 0.35;
+  opacity: 0.4;
+  pointer-events: auto;
+  cursor: pointer;
 }
 
 .hud-pause {

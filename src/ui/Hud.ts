@@ -1,3 +1,5 @@
+import { bindUpdateCheck } from './update.ts';
+
 /** DOM overlay: score, high score, lives, laser and rocket levels, center message, and an optional FPS meter. */
 export class Hud {
   private readonly root: HTMLDivElement;
@@ -38,8 +40,12 @@ export class Hud {
 
     this.root.append(top, this.message);
 
-    const version = el('div', 'hud-version');
-    version.textContent = `v${__APP_VERSION__} · ${__APP_COMMIT__}`;
+    const version = document.createElement('button');
+    version.type = 'button';
+    version.className = 'hud-version';
+    version.title = 'Check for update';
+    const label = `v${__APP_VERSION__} · ${__APP_COMMIT__} ⟳`;
+    bindUpdateCheck(version, label);
     this.root.append(version);
 
     const showFps = import.meta.env.DEV || new URLSearchParams(location.search).has('fps');

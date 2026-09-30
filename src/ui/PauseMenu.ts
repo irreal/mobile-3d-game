@@ -1,4 +1,5 @@
 import { replyDelayBeats, setReplyDelayBeats } from '../game/replyDelay.ts';
+import { bindUpdateCheck } from './update.ts';
 
 export interface PauseMenuActions {
   pause: () => void;
@@ -30,6 +31,7 @@ export class PauseMenu {
   private readonly effectsButton: HTMLButtonElement;
   private readonly tutorialButton: HTMLButtonElement;
   private readonly weaponRows: (() => void)[] = [];
+  private readonly resetUpdate: () => void;
   private open = false;
 
   constructor(overlay: HTMLElement, actions: PauseMenuActions, muted: boolean, effects: 'high' | 'low') {
@@ -59,6 +61,8 @@ export class PauseMenu {
       this.tutorialButton.textContent = 'Tutorials reset ✓';
       this.tutorialButton.disabled = true;
     });
+    const updateButton = menuButton('', () => {});
+    this.resetUpdate = bindUpdateCheck(updateButton, 'Check for update');
     card.append(
       title,
       menuButton('Resume', actions.resume, 'primary'),
@@ -71,6 +75,7 @@ export class PauseMenu {
       this.weaponRow('Laser', 'laser', actions),
       this.weaponRow('Rockets', 'rocket', actions),
       replyDelayRow(),
+      updateButton,
       menuButton('Quit to title', actions.quit),
       credits(),
     );
@@ -95,6 +100,7 @@ export class PauseMenu {
     this.tutorialButton.textContent = 'Show tutorials again';
     this.tutorialButton.disabled = false;
     for (const render of this.weaponRows) render();
+    this.resetUpdate();
   }
 
   /** Stepper for a weapon level (testing). */
