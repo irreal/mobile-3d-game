@@ -113,14 +113,17 @@ const GRADE_LABEL: Record<Exclude<Grade, 'call'>, string> = {
 };
 /**
  * Call rhythms per bar in 8th notes ('x' = an enemy calls), by difficulty level. The
- * level rises with each strike and again halfway through a strike.
+ * level rises with each strike and again halfway through a strike. Calls stay within the
+ * first three beats: the fourth is the count-in to the response.
  */
 const PATTERNS: readonly (readonly string[])[] = [
-  ['x...x...', 'x.x.x...', 'x...x.x.', 'x.x.....'],
-  ['x.x.x...', 'x.x.x.x.', 'x..x..x.', 'xx..x...', 'x...x.x.'],
-  ['x.x.x.x.', 'x.xx.x..', 'xx.x.x..', 'x.x.xx..', 'x..xx.x.'],
-  ['x.xxx.x.', 'xx.xx.x.', 'x.x.xxx.', 'xxx.x.x.', 'x.xx.xx.'],
+  ['x...x...', 'x.x.x...', 'x.x.....', 'x...xx..'],
+  ['x.x.x...', 'x..x.x..', 'xx..x...', 'x.xx....', 'x.x.xx..'],
+  ['x.xxx...', 'xx.x.x..', 'x.x.xx..', 'x..xxx..', 'xx.xx...'],
+  ['x.xxxx..', 'xx.xxx..', 'xxx.xx..', 'xxxx.x..', 'x.xxx.x.'],
 ];
+/** Beat (from the phrase start) where the swoosh ends: one count-in beat before the first reply. */
+const CUE_BEAT = 3;
 /** Beats from a call to its reply: the response bar follows the call bar directly. */
 const RESPONSE_OFFSET = 4;
 /** Beats per phrase: call bar, response bar, then a rest bar before the next call. */
@@ -488,7 +491,7 @@ export class CockpitSection {
   /** Schedules call sounds on the music clock and shows each call as it happens. */
   private updateCalls(): void {
     for (const p of this.phrases) {
-      const turn = p.start + 4;
+      const turn = p.start + CUE_BEAT;
       if (!p.cueSounded && this.beat >= turn - 1.5) {
         p.cueSounded = true;
         const riseStart = this.music.timeOfBeat(turn - 1) ?? undefined;
@@ -876,7 +879,7 @@ export class CockpitSection {
         n.sr = screen.r;
         // Targets get their numbered circle once their call is done and the reply is near.
         const until = n.beat - this.beat;
-        if (!n.called || this.beat < p.start + RESPONSE_OFFSET - 0.5) continue;
+        if (!n.called || this.beat < p.start + CUE_BEAT) continue;
         const isNext = n === next;
         this.markers.push({
           x: screen.x,
@@ -897,8 +900,9 @@ export class CockpitSection {
 
     const current = this.phrases.find((p) => this.beat >= p.start && this.beat < p.start + RESPONSE_OFFSET + 4);
     const inPhrase = current ? this.beat - current.start : 0;
-    const mode: PhraseMode = !current ? null : inPhrase < 4 ? 'watch' : 'repeat';
-    const pip = inPhrase < 4 ? Math.floor(inPhrase) : Math.floor(inPhrase - RESPONSE_OFFSET);
+    const mode: PhraseMode = !current ? null : inPhrase < CUE_BEAT ? 'watch' : 'repeat';
+    // REPEAT shows from the cue; its beat pips start with the response itself.
+    const pip = inPhrase < CUE_BEAT ? Math.floor(inPhrase) : Math.floor(inPhrase - RESPONSE_OFFSET);
     this.overlay.setPhase(mode, pip);
     this.overlay.setHintVisible(frame.active && this.phraseCount <= 2 && this.strike <= 1);
   }
