@@ -108,9 +108,14 @@ const ROCKET_COLOR = new Color(0xffd08a).multiplyScalar(1.2);
 
 const GAMEOVER_INPUT_DELAY = 1.2;
 
-/** Upgrade close-up timeline (real seconds): zoom in, hold (part installs), zoom out. */
-const UPGRADE_IN = 0.45;
-const UPGRADE_HOLD_END = 1.8;
+/**
+ * Upgrade close-up timeline (real seconds): time slows to a crawl first, then the camera zooms
+ * in, the part installs, it holds, and zooms back out as time speeds up again.
+ */
+const UPGRADE_SLOW = 0.4;
+const UPGRADE_ZOOM_AT = 1;
+const UPGRADE_IN = 0.55;
+const UPGRADE_HOLD_END = 2.7;
 const UPGRADE_OUT = 0.6;
 const UPGRADE_TIME_SCALE = 0.06;
 /** Victory: when the "mission complete" card appears, and when a tap restarts. */
@@ -483,10 +488,11 @@ export class ShooterScene implements GameScene {
 
       case 'toShmup':
         this.input.consumeDrag(this.drag);
+        if (this.isFinalWave) this.environment.hurryDeparture(1.6);
         if (!this.director.transitioning) {
           this.cockpit.clear();
-          if (this.isFinalWave) this.startVictory();
-          else this.startNextWave();
+          if (!this.isFinalWave) this.startNextWave();
+          else if (this.environment.departureDone) this.startVictory();
         }
         break;
     }
@@ -582,11 +588,16 @@ export class ShooterScene implements GameScene {
     }
     const t = (this.upgradeTime += realDt);
     const out = Math.min(1, Math.max(0, (t - UPGRADE_HOLD_END) / UPGRADE_OUT));
-    this.timeScale =
-      t < UPGRADE_IN ? MathUtils.lerp(1, UPGRADE_TIME_SCALE, t / UPGRADE_IN) : MathUtils.lerp(UPGRADE_TIME_SCALE, 1, out * out);
-    this.director.focus = t < UPGRADE_IN ? t / UPGRADE_IN : 1 - out;
-    this.director.focusAngle = MathUtils.lerp(-0.45, 0.35, Math.min(1, t / (UPGRADE_HOLD_END + UPGRADE_OUT)));
-    if (!this.upgradeInstalled && t >= UPGRADE_IN * 0.85) {
+    const slow = MathUtils.smoothstep(t, 0, UPGRADE_SLOW);
+    this.timeScale = out > 0 ? MathUtils.lerp(UPGRADE_TIME_SCALE, 1, out * out) : MathUtils.lerp(1, UPGRADE_TIME_SCALE, slow);
+    const zoomIn = Math.min(1, Math.max(0, (t - UPGRADE_ZOOM_AT) / UPGRADE_IN));
+    this.director.focus = out > 0 ? 1 - out : zoomIn;
+    this.director.focusAngle = MathUtils.lerp(
+      -0.45,
+      0.35,
+      Math.min(1, Math.max(0, (t - UPGRADE_ZOOM_AT) / (UPGRADE_HOLD_END + UPGRADE_OUT - UPGRADE_ZOOM_AT))),
+    );
+    if (!this.upgradeInstalled && t >= UPGRADE_ZOOM_AT + UPGRADE_IN * 0.85) {
       this.upgradeInstalled = true;
       this.syncWeapons(true);
       this.audio.sfx.install();

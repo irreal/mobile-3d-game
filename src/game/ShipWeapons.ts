@@ -4,10 +4,10 @@ import { LASER_LEVELS, ROCKET_LEVELS } from './constants.ts';
 import { createGlowMaterial, glowGeometry } from './glow.ts';
 
 const geo = {
-  barrel: new CylinderGeometry(0.045, 0.06, 0.62, 8),
-  muzzle: new SphereGeometry(0.06, 8, 6),
-  pod: new CapsuleGeometry(0.085, 0.36, 4, 8),
-  podTip: new SphereGeometry(0.07, 8, 6),
+  barrel: new CylinderGeometry(0.032, 0.042, 0.42, 8),
+  muzzle: new SphereGeometry(0.042, 8, 6),
+  pod: new CapsuleGeometry(0.06, 0.25, 4, 8),
+  podTip: new SphereGeometry(0.05, 8, 6),
 };
 const gunMetal = new MeshStandardMaterial({ color: 0x9aa4bd, metalness: 0.7, roughness: 0.3 });
 const laserTip = new MeshStandardMaterial({ color: 0x103040, emissive: 0x6ff3ff, emissiveIntensity: 1.2 });
@@ -97,9 +97,9 @@ export class ShipWeapons {
     const g = new Group();
     const barrel = new Mesh(geo.barrel, gunMetal);
     const tip = new Mesh(geo.muzzle, laserTip);
-    tip.position.y = 0.33;
+    tip.position.y = 0.22;
     g.add(barrel, tip);
-    g.position.set(dx, 0.5 - Math.abs(dx) * 0.55, 0.16);
+    g.position.set(dx * 0.8, 0.42 - Math.abs(dx) * 0.5, 0.08);
     g.rotation.z = (deg * Math.PI) / 180;
     return g;
   }
@@ -108,9 +108,9 @@ export class ShipWeapons {
     const g = new Group();
     const body = new Mesh(geo.pod, podBody);
     const tip = new Mesh(geo.podTip, homing ? homingTip : podTip);
-    tip.position.y = 0.28;
+    tip.position.y = 0.19;
     g.add(body, tip);
-    g.position.set(dx, -0.2, dx === 0 ? -0.2 : -0.12);
+    g.position.set(dx * 0.8, -0.2, dx === 0 ? -0.12 : -0.06);
     if (splash) g.scale.setScalar(1.25);
     g.userData.baseScale = splash ? 1.25 : 1;
     return g;

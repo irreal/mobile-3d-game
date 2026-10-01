@@ -391,6 +391,7 @@ export class Environment {
   private approach = 0;
   private departed: Exclude<EnvironmentId, 'space'> | null = null;
   private departTime = Infinity;
+  private departRate = 1;
   private victoryPlanets: Planet[] | null = null;
   private readonly victoryAnchor = new Vector3();
   private victoryTime = -1;
@@ -501,8 +502,20 @@ export class Environment {
     this.atmosphere = id === 'space' ? 0 : 1;
     this.departed = null;
     this.departTime = Infinity;
+    this.departRate = 1;
     this.planetFade = 1;
-    this.planetSize = this.approach;
+    this.approach = 0;
+    this.planetSize = 0;
+  }
+
+  /** Speeds up the planet we just left on its way off the bottom of the screen. */
+  hurryDeparture(rate: number): void {
+    this.departRate = rate;
+  }
+
+  /** True once the planet we climbed out of has dropped off screen (or there is none). */
+  get departureDone(): boolean {
+    return !this.departed || this.departTime >= DEPART_SECONDS * 0.8;
   }
 
   /** In space: which planet lies ahead and how close it is (0 far, 1 about to enter). */
@@ -619,8 +632,8 @@ export class Environment {
       this.planetSize = size;
     } else if (this.departed && this.departTime < DEPART_SECONDS) {
       // Climbing out: the planet we left drops away below and behind.
-      this.departTime += dt;
-      const t = this.departTime / DEPART_SECONDS;
+      this.departTime += dt * this.departRate;
+      const t = Math.min(1, this.departTime / DEPART_SECONDS);
       look = this.departed;
       size = MathUtils.lerp(1.2, 0.35, 1 - (1 - t) ** 2);
       screenY = MathUtils.lerp(0, -1.6, t ** 1.4);
