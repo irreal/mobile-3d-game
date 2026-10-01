@@ -1,0 +1,58 @@
+# Nova Strike co-op server stack.
+#
+#   game     Go/Pion WebRTC server. The UDP port is published directly (no proxy in the way)
+#            so game traffic goes straight from the browser to the server.
+#   proxy    nginx terminating TLS for the HTTPS signalling endpoint only.
+#   certbot  Let's Encrypt certificate via the Cloudflare DNS challenge (no port 80 needed).
+#
+# Configure in .env (see .env.example), then: docker compose up -d --build
+name: nova-strike
+
+services:
+  game:
+    build: ../server
+    restart: unless-stopped
+    environment:
+      PUBLIC_IP: ${PUBLIC_IP:?set PUBLIC_IP in .env}
+      RTC_UDP_PORT: ${RTC_UDP_PORT:-47100}
+      HTTP_ADDR: ":8080"
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://irreal.github.io}
+      MAX_PLAYERS: ${MAX_PLAYERS:-16}
+    ports:
+      # Container and host port must match: it's the port advertised to browsers.
+      - "${RTC_UDP_PORT:-47100}:${RTC_UDP_PORT:-47100}/udp"
+    expose:
+      - "8080"
+
+  proxy:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      - game
+      - certbot
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+      SIGNAL_PORT: ${SIGNAL_PORT:-7443}
+    ports:
+      - "${SIGNAL_PORT:-7443}:${SIGNAL_PORT:-7443}"
+    volumes:
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - ./nginx/run.sh:/run.sh:ro
+      - letsencrypt:/etc/letsencrypt:ro
+    entrypoint: ["/bin/sh", "/run.sh"]
+
+  certbot:
+    image: certbot/dns-cloudflare:latest
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN}
+      EMAIL: ${EMAIL:?set EMAIL in .env}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:?set CLOUDFLARE_API_TOKEN in .env}
+      CERTBOT_STAGING: ${CERTBOT_STAGING:-0}
+    volumes:
+      - ./certbot/run.sh:/run.sh:ro
+      - letsencrypt:/etc/letsencrypt
+    entrypoint: ["/bin/sh", "/run.sh"]
+
+volumes:
+  letsencrypt:

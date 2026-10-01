@@ -4,3 +4,6 @@ dist
 .DS_Store
 .vite
 npm-debug.log*
+
+# Co-op server secrets
+deploy/.env

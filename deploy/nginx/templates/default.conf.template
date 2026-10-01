@@ -1,0 +1,30 @@
+# Rendered by the nginx image's envsubst step (only DOMAIN and SIGNAL_PORT are substituted).
+# Only signalling goes through here; WebRTC traffic goes straight to the game's UDP port.
+server {
+    listen ${SIGNAL_PORT} ssl;
+    http2 on;
+    server_name ${DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_session_cache   shared:SSL:1m;
+
+    client_max_body_size 64k;
+
+    location /rtc/ {
+        proxy_pass http://game:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 15s;
+    }
+
+    location = /healthz {
+        proxy_pass http://game:8080;
+    }
+
+    location / {
+        return 404;
+    }
+}

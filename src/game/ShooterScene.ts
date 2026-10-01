@@ -51,6 +51,8 @@ import { Environment, environmentForWave, upcomingPlanet } from './Environment.t
 import type { EnvironmentId } from './Environment.ts';
 import type { EnemyContext, EnemyKind } from './Enemy.ts';
 import { InstancedPool } from './InstancedPool.ts';
+import { RemoteShips } from './RemoteShips.ts';
+import { COOP_ALIVE, COOP_COCKPIT, COOP_FIRING, CoopClient, coopServerUrl, loadCoop, saveCoop } from '../net/CoopClient.ts';
 import { createPowerup, disposeModel, POWERUP_COLORS, POWERUP_KINDS, sharedGeometries } from './models.ts';
 import type { PowerupKind, PowerupModel } from './models.ts';
 import { Playfield } from './Playfield.ts';
@@ -172,6 +174,8 @@ export class ShooterScene implements GameScene {
   private readonly cockpitFill = new DirectionalLight(0xcfe0ff, 0);
   private readonly warp = new WarpField();
   private readonly interior = new CockpitInterior();
+  private readonly coop = new CoopClient();
+  private readonly remoteShips = new RemoteShips(this.scene);
   private readonly rhythm: CockpitSection;
   private readonly asteroids: AsteroidRun;
   /** The first-person mini-game for the current (or last) strike. */
@@ -285,6 +289,8 @@ export class ShooterScene implements GameScene {
           return fx.quality;
         },
         resetTutorials: () => this.tutorial.store.reset(),
+        coopLabel: () => this.coopLabel(),
+        toggleCoop: () => this.toggleCoop(),
       },
       audio.engine.muted,
       fx.quality,
@@ -350,6 +356,11 @@ export class ShooterScene implements GameScene {
       if (!this.frozen) this.cockpit.drag(x, y);
     });
     this.unsubscribeRelease = input.onRelease(() => this.cockpit.release());
+    this.coop.onChange = () => this.pauseMenu.refresh();
+    window.addEventListener('pagehide', () => this.coop.disconnect());
+    const saved = loadCoop();
+    const url = coopServerUrl();
+    if (url && (saved.enabled || new URLSearchParams(location.search).has('coop'))) this.coop.connect(url);
     this.enterTitle();
   }
 
@@ -370,6 +381,7 @@ export class ShooterScene implements GameScene {
       this.cockpit.resync();
       this.input.consumeDrag(this.drag);
       this.director.update(0, this.camera, this.playfield.cameraDistance, this.player.x, this.player.y, 0);
+      this.updateCoop(realDt);
       this.updateHud();
       return;
     }
@@ -403,6 +415,7 @@ export class ShooterScene implements GameScene {
     this.updateBarrier(realDt);
     this.syncWeapons();
     this.player.weapons.update(realDt);
+    this.updateCoop(realDt);
     this.updateEnginePlume(dt);
     this.updateDeathBursts(dt);
     this.effects.update(dt, this.camera);
@@ -988,6 +1001,8 @@ export class ShooterScene implements GameScene {
   }
 
   dispose(): void {
+    this.coop.disconnect();
+    this.remoteShips.clear();
     this.unsubscribeTap();
     this.unsubscribePress();
     this.unsubscribeMove();
@@ -1573,6 +1588,60 @@ export class ShooterScene implements GameScene {
     disposeModel(p.model);
   }
 
+  // --- Co-op ---------------------------------------------------------------------------
+
+  /** Shares our ship with the server and draws everybody else's. */
+  private updateCoop(realDt: number): void {
+    const pf = this.playfield;
+    if (this.coop.status === 'online') {
+      const playing = this.state === 'playing';
+      const firing = playing && !this.frozen && (this.phase === 'shmup' || this.phase === 'bossApproach' || this.phase === 'boss');
+      this.coop.sendState({
+        x: this.player.x / pf.halfWidth,
+        y: (this.player.y - pf.bottom) / (pf.top - pf.bottom),
+        flags:
+          (playing && !this.player.destroyed ? COOP_ALIVE : 0) |
+          (firing ? COOP_FIRING : 0) |
+          (this.director.blend > 0.5 ? COOP_COCKPIT : 0),
+        gun: GUN_TYPES.indexOf(this.gunType),
+        gunLevel: this.gunLevel,
+        rocketLevel: this.rocketLevel,
+        wave: this.spawner.wave,
+      });
+    }
+    const players = this.coop.status === 'online' ? this.coop.remotes() : [];
+    this.remoteShips.update(realDt, players, pf, this.director.blend < 0.3 && this.director.victory < 0);
+  }
+
+  private coopLabel(): string {
+    const c = this.coop;
+    switch (c.status) {
+      case 'off':
+        return 'Co-op: Off';
+      case 'connecting':
+        return 'Co-op: Connecting…';
+      case 'error':
+        return `Co-op: ${c.error || 'error'} (retrying)`;
+      case 'online':
+        return `Co-op: On · ${c.others + 1} online${c.rttMs ? ` · ${c.rttMs} ms` : ''}`;
+    }
+  }
+
+  private toggleCoop(): void {
+    if (this.coop.status !== 'off') {
+      this.coop.disconnect();
+      saveCoop(coopServerUrl(), false);
+      return;
+    }
+    let url = coopServerUrl();
+    if (!url) {
+      url = window.prompt('Co-op server address', 'https://coop.example.com:7443')?.trim() ?? '';
+      if (!url) return;
+    }
+    saveCoop(url, true);
+    this.coop.connect(url);
+  }
+
   // --- Presentation ----------------------------------------------------------------------
 
   /** Screen shockwave (and a little aberration) at a world position. */
@@ -1611,6 +1680,7 @@ export class ShooterScene implements GameScene {
     this.hud.setScore(this.score);
     this.hud.setHiScore(Math.max(this.hiScore, this.score));
     this.hud.setLives(this.state === 'title' ? PLAYER.lives : this.lives);
+    this.hud.setCoop(this.coop.status === 'online' ? `CO-OP · ${this.coop.others + 1}` : this.coop.status === 'connecting' ? 'CO-OP …' : '');
     this.hud.setWeapons(GUNS[this.gunType], this.gunLevel, MAX_GUN_LEVEL, this.rocketLevel, MAX_ROCKET, this.barrier);
   }
 }

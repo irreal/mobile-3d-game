@@ -105,6 +105,10 @@ body {
   color: #ffa040;
 }
 
+.hud-weapon.coop {
+  color: #57ff9a;
+}
+
 .hud-weapon.barrier {
   color: #bfe6ff;
 }

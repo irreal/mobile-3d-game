@@ -19,6 +19,9 @@ export interface PauseMenuActions {
   /** Testing: read / set weapon levels (clamped by the game); `set` returns the new level. */
   weaponLevel: (weapon: Weapon) => { level: number; max: number };
   setWeaponLevel: (weapon: Weapon, level: number) => number;
+  /** Co-op button text, and toggling the connection. */
+  coopLabel: () => string;
+  toggleCoop: () => void;
   /** Testing: current main gun name, and switching to the next one (returns its name). */
   gunName: () => string;
   cycleGun: () => string;
@@ -72,6 +75,7 @@ export class PauseMenu {
       title,
       menuButton('Resume', actions.resume, 'primary'),
       menuButton('Restart', actions.restart),
+      this.coopButton(actions),
       this.soundButton,
       this.effectsButton,
       this.tutorialButton,
@@ -130,6 +134,24 @@ export class PauseMenu {
     this.weaponRows.push(render);
     render();
     return row;
+  }
+
+  /** Re-renders live rows (e.g. when the co-op connection changes). */
+  refresh(): void {
+    if (this.open) for (const render of this.weaponRows) render();
+  }
+
+  private coopButton(actions: PauseMenuActions): HTMLButtonElement {
+    const button = menuButton('', () => {
+      actions.toggleCoop();
+      render();
+    });
+    const render = (): void => {
+      button.textContent = actions.coopLabel();
+    };
+    this.weaponRows.push(render);
+    render();
+    return button;
   }
 
   /** Switches the main gun type (testing). */

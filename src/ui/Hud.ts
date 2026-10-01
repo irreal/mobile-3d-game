@@ -10,6 +10,7 @@ export class Hud {
   private readonly laser: HTMLDivElement;
   private readonly rocket: HTMLDivElement;
   private readonly barrier: HTMLDivElement;
+  private readonly coop: HTMLDivElement;
   private readonly message: HTMLDivElement;
   private readonly messageTitle: HTMLDivElement;
   private readonly messageBody: HTMLDivElement;
@@ -34,7 +35,8 @@ export class Hud {
     this.barrier = el('div', 'hud-weapon barrier');
     this.barrier.textContent = 'BARRIER ◈';
     this.barrier.hidden = true;
-    right.append(this.lives, this.laser, this.rocket, this.barrier);
+    this.coop = el('div', 'hud-weapon coop');
+    right.append(this.lives, this.laser, this.rocket, this.barrier, this.coop);
     top.append(this.score, center, right);
 
     this.message = el('div', 'hud-message');
@@ -103,6 +105,11 @@ export class Hud {
     if (lives === this.shown.lives) return;
     this.shown.lives = lives;
     this.lives.textContent = '▲'.repeat(Math.max(0, lives));
+  }
+
+  /** Co-op status line; empty hides it. */
+  setCoop(text: string): void {
+    if (this.coop.textContent !== text) this.coop.textContent = text;
   }
 
   /** Main gun (short tag, colour, level), rockets, and whether a barrier is up. */
