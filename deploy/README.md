@@ -31,14 +31,19 @@ default and reconnects to it on later visits. To use another server, open the ga
 
 Every connected player shares one run. The server starts each wave for the whole squad
 once everyone is ready, or 20 s after the first player is. It sends a seed and a start time,
-and every client simulates the same enemies in step with the server clock. Damage, kills
-and power-orb pickups are shared, and the server makes sure each kill or pickup counts once.
-Scores and lives are personal. A player who joins mid-wave, or comes back from the pause
-menu, fast-forwards to where the squad is. In co-op the arena is the narrowest width any
-screen shows.
+and every client simulates the same enemies in step with the server clock. That includes
+their fire: each enemy's fire timing is seeded, and aimed shots go at a squad member's
+position from 250 ms earlier, using the timestamped ship states every client receives. When
+someone reaches a planet's alien base, the server sets one start time for the base fight.
+More players get more power-orb carriers (the heavies), in proportion to the squad size at
+the start of the wave. Damage, kills and power-orb pickups are shared, and the server makes
+sure each kill or pickup counts once. Scores and lives are personal. A player who joins
+mid-wave, or comes back from the pause menu, fast-forwards to where the squad is. In co-op the
+arena is the narrowest width any screen shows.
 
 Redeploy the game container after updating: the client and server must speak the same
-protocol.
+protocol. The client sends its protocol version when connecting. A mismatched server answers
+426, and a mismatched client sees "game out of date: reload" or "server out of date".
 
 ## Running the server without Docker
 

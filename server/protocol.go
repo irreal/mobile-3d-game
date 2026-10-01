@@ -7,11 +7,13 @@ import (
 
 // Binary messages on the unreliable "state" channel (little-endian).
 //
-// Client → server, msgPlayerState (14 bytes):
+// Client → server, msgPlayerState (18 bytes):
 //
-//	u8 type | f32 x | f32 y | u8 flags | u8 gun | u8 gunLevel | u8 rocketLevel | u8 wave
+//	u8 type | f32 x | f32 y | u8 flags | u8 gun | u8 gunLevel | u8 rocketLevel | u8 wave | u32 time
 //
 // x is -1..1 across the shared arena and y is world y over the arena's half height (about -1..1).
+// time is the low 32 bits of the sender's estimate of server time (Unix ms) when it sent the
+// state; enemies aim from these timed samples, so every client aims the same shots.
 //
 // Server → client, msgSnapshot:
 //
@@ -19,19 +21,25 @@ import (
 //
 // JSON messages on the reliable "events" channel:
 //
-//	server → client: {"t":"welcome","id":1,"players":[2,3]} {"t":"join","id":4} {"t":"leave","id":2}
+//	server → client: {"t":"welcome","id":1,"players":[2,3],"v":2} {"t":"join","id":4} {"t":"leave","id":2}
 //	                 {"t":"pong","c":<client ms>,"s":<server ms>}
-//	                 {"t":"wave","w":3,"seed":<u32>,"at":<server ms>,"kills":[ids],"picks":[ids]}
+//	                 {"t":"wave","w":3,"seed":<u32>,"at":<server ms>,"squad":2,"kills":[ids],"picks":[ids]}
+//	                 {"t":"boss","w":4,"at":<server ms>} (the base fight starts for everyone)
 //	                 {"t":"kill"|"pick","w":3,"id":17,"by":2} {"t":"dmg","w":3,"by":2,"h":[[id,damage],…]}
 //	                 {"t":"out","id":2,"quit":false} (game over; quit: disconnected)
 //	client → server: {"t":"ping","c":<client ms>}
 //	                 {"t":"ready","w":<wave wanted>} {"t":"out"} (game over)
 //	                 {"t":"kill"|"pick","w":3,"id":17} {"t":"dmg","w":3,"h":[[id,damage],…]}
+//	                 {"t":"boss","w":4} (this client reached the base)
+//
+// Clients put ?v=<protocolVersion> on the offer URL; others get 426 Upgrade Required.
 const (
+	protocolVersion = 2
+
 	msgPlayerState = 1
 	msgSnapshot    = 2
 
-	stateBytes  = 13
+	stateBytes  = 17
 	playerBytes = 2 + stateBytes
 )
 

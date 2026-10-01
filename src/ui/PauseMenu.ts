@@ -10,8 +10,10 @@ export interface PauseMenuActions {
   /** Toggles post-processing quality; returns the new setting. */
   toggleEffects: () => 'high' | 'low';
   resetTutorials: () => void;
-  /** Testing shortcut: jump to cockpit strike N (1-based). */
-  jumpToCockpit: (strike: number) => void;
+  /** Testing: every registered mini-game, enabled or not. */
+  miniGames: () => { id: string; name: string; enabled: boolean }[];
+  /** Testing shortcut: play mini-game `id` at its Nth (1-based) strike. */
+  jumpToMiniGame: (id: string, round: number) => void;
   /** Testing shortcut: jump to the alien base fight on planet N (1-based). */
   jumpToBase: (planet: number) => void;
   /** Testing shortcut: play the ending. */
@@ -29,7 +31,7 @@ export interface PauseMenuActions {
 
 export type Weapon = 'gun' | 'rocket';
 
-const TEST_STRIKES = 5;
+const TEST_ROUNDS = 3;
 
 /** Pause button (during play) and the modal pause menu. */
 export class PauseMenu {
@@ -79,7 +81,7 @@ export class PauseMenu {
       this.soundButton,
       this.effectsButton,
       this.tutorialButton,
-      testRow(actions.jumpToCockpit),
+      ...actions.miniGames().map((game) => miniGameTestRow(game, actions.jumpToMiniGame)),
       baseTestRow(actions.jumpToBase, actions.jumpToVictory),
       this.gunRow(actions),
       this.weaponRow('Gun level', 'gun', actions),
@@ -196,15 +198,18 @@ function credits(): HTMLDivElement {
   return c;
 }
 
-/** Row of small buttons that jump to each cockpit strike level. */
-function testRow(jump: (strike: number) => void): HTMLDivElement {
+/** Row of small buttons that start a mini-game at each of its first strikes. */
+function miniGameTestRow(
+  game: { id: string; name: string; enabled: boolean },
+  jump: (id: string, round: number) => void,
+): HTMLDivElement {
   const row = document.createElement('div');
   row.className = 'menu-row';
   const label = document.createElement('span');
-  label.textContent = 'Cockpit test (1, 3, 5: asteroids)';
+  label.textContent = `${game.name} test${game.enabled ? '' : ' (off)'}`;
   row.append(label);
-  for (let i = 1; i <= TEST_STRIKES; i++) {
-    const b = menuButton(String(i), () => jump(i));
+  for (let i = 1; i <= TEST_ROUNDS; i++) {
+    const b = menuButton(String(i), () => jump(game.id, i));
     b.classList.add('small');
     row.append(b);
   }

@@ -122,3 +122,28 @@ func TestStaleWaveEventsIgnored(t *testing.T) {
 		t.Fatalf("got %v", msgs)
 	}
 }
+
+func TestBossStartsOnceForTheSquad(t *testing.T) {
+	g, rec := newTestGame()
+	now := time.UnixMilli(10_000)
+	g.handle(1, clientEvent{T: "ready", W: 1}, now)
+	g.handle(2, clientEvent{T: "ready", W: 1}, now)
+	if msgs := rec.take(); msgs[0].v["squad"] != 1 {
+		t.Fatalf("squad at start = %v", msgs[0].v["squad"])
+	}
+	g.handle(1, clientEvent{T: "boss", W: 1}, now)
+	msgs := rec.take()
+	if len(msgs) != 1 || msgs[0].v["t"] != "boss" || msgs[0].except != 0 || msgs[0].v["at"] != now.Add(bossLead).UnixMilli() {
+		t.Fatalf("got %v", msgs)
+	}
+	// The second player gets the same start time, and only they get it.
+	g.handle(2, clientEvent{T: "boss", W: 1}, now.Add(time.Second))
+	msgs = rec.take()
+	if len(msgs) != 1 || msgs[0].to != 2 || msgs[0].v["at"] != now.Add(bossLead).UnixMilli() {
+		t.Fatalf("got %v", msgs)
+	}
+	g.handle(1, clientEvent{T: "boss", W: 7}, now)
+	if msgs := rec.take(); len(msgs) != 0 {
+		t.Fatalf("stale boss request answered: %v", msgs)
+	}
+}

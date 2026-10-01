@@ -98,17 +98,24 @@ menu's Base test row plays it directly.
 Planets are drawn by `Environment.ts` (and `Planet.ts` for the globe seen from space): a sky dome, a procedural heightfield terrain scrolling below the playfield
 (mesas, islands in a sea, or rock over glowing lava, with fog toward the horizon) and drifting
 clouds; stars and the nebula fade out while inside an atmosphere. Everything is generated in
-shaders, so there are no extra asset downloads. The cockpit test in the pause menu starts in the
-world of that strike (level 2 is the desert, 4 the ocean).
+shaders, so there are no extra asset downloads. The mini-game tests in the pause menu start in a
+world that game is played in.
 
 ### Cockpit strikes (between waves)
 
 Each wave is a fixed number of formations, and enemy HP grows each wave. After every second wave
 (2, 4, 6, …), once the last enemy is gone, the camera slowly swoops down behind the ship (with cinematic letterbox bars and a barrel
-roll) into the cockpit. The HUD powers on (flicker, scan line, boot text), then the enemy
-squadron drops out of warp right in front of you and you fight it in first person:
+roll) into the cockpit. The HUD powers on (flicker, scan line, boot text), and you play a
+first-person mini-game. They're registered in `src/game/minigames/registry.ts`; see
+[docs/MINI_GAMES.md](docs/MINI_GAMES.md) for how they plug in and how to add one.
 
-The fight is a **call-and-response rhythm game locked to the cockpit music** (146 BPM), in
+- **Asteroids** (strikes in space): steer through rocks, walls and boulders, and fly through
+  rings for points and combo.
+- **Rhythm** (over planets; **disabled for now**, see below). Until a planet mini-game is
+  enabled, planet strikes are skipped: after the base the ship flies straight on to the next
+  world.
+
+Rhythm is a **call-and-response game locked to the cockpit music** (146 BPM), in
 phrases of three bars (call bar, response bar, then a rest bar):
 
 - **WATCH (call bar):** enemies drop out of warp one at a time on an 8th-note rhythm, within the
@@ -158,12 +165,12 @@ phrases of three bars (call bar, response bar, then a rest bar):
   High/Low, Show tutorials again, and Quit to title.
 - **Testing rows** (pause menu): *Base test* jumps to each planet's alien base, and *Laser* /
   *Rockets* steppers set the weapon levels directly.
-- **Cockpit test** (pause menu, for testing): buttons 1–5 jump straight into that cockpit strike
-  level of the current game (the fly-in plays, then the squadron for that strike).
+- **Mini-game tests** (pause menu): a row per mini-game, disabled ones included (marked *off*).
+  Buttons 1–3 start it at its 1st–3rd strike, in a world it's played in (the fly-in plays first).
 - Dying blows the ship up in a chain of explosions and it stays gone for the game-over screen; in
   the cockpit the first-person view is kept and the blasts go off in front of the canopy.
 - **Tutorials:** a quick "How to fly" card at the start of each game, and a "Cockpit strike" card the
-  first time you enter the cockpit in each game. From the third time a card is shown, it offers
+  first time you play Rhythm in each game. From the third time a card is shown, it offers
   a *Don't show again* checkbox. Show counts and opt-outs are stored in `localStorage`
   (`nova-strike:tutorial:*`). *Show tutorials again* in the pause menu clears them.
 - **Check for update:** tap the version label (bottom-left, also on the title screen) or *Check for

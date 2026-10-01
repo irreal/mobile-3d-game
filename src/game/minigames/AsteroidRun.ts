@@ -15,11 +15,11 @@ import {
   Vector3,
 } from 'three';
 import type { Scene } from 'three';
-import type { Sfx } from '../audio/Sfx.ts';
-import type { CockpitOverlay, Grade } from '../ui/CockpitOverlay.ts';
-import type { CockpitCallbacks, CockpitFrame, CockpitGame, SectionStatus } from './CockpitSection.ts';
-import { COCKPIT } from './constants.ts';
-import type { Effects } from './Effects.ts';
+import type { Sfx } from '../../audio/Sfx.ts';
+import type { CockpitOverlay, Grade } from '../../ui/CockpitOverlay.ts';
+import { COCKPIT } from '../constants.ts';
+import type { Effects } from '../Effects.ts';
+import type { MiniGame, MiniGameCallbacks, MiniGameContext, MiniGameFrame, MiniGameStatus } from './MiniGame.ts';
 
 interface Rock {
   mesh: Mesh;
@@ -72,7 +72,7 @@ const tmp = new Vector3();
  * rings for points and combo. Hits drain the shield, then lives. The field rushes toward
  * the cockpit and banks as you steer; the crosshair is the ship's centre.
  */
-export class AsteroidRun implements CockpitGame {
+export class AsteroidRun implements MiniGame {
   private readonly root = new Group();
   private readonly field = new Group();
   private readonly rocks: Rock[] = [];
@@ -109,7 +109,7 @@ export class AsteroidRun implements CockpitGame {
   private hits = 0;
   private widthPx = 1;
   private heightPx = 1;
-  private lastFrame: CockpitFrame | null = null;
+  private lastFrame: MiniGameFrame | null = null;
   combo = 0;
   maxCombo = 0;
 
@@ -118,7 +118,7 @@ export class AsteroidRun implements CockpitGame {
     private readonly effects: Effects,
     private readonly overlay: CockpitOverlay,
     private readonly sfx: Sfx,
-    private readonly callbacks: CockpitCallbacks,
+    private readonly callbacks: MiniGameCallbacks,
   ) {
     for (let i = 0; i < DUST; i++) this.placeDust(i, Math.random() * SPAWN_DEPTH);
     const geometry = new BufferGeometry();
@@ -143,7 +143,7 @@ export class AsteroidRun implements CockpitGame {
     return 1 + Math.floor(this.combo / COCKPIT.comboStep) * 0.5;
   }
 
-  start(_shipX: number, _shipY: number, strike: number): void {
+  start({ strike }: MiniGameContext): void {
     this.clear();
     this.running = true;
     this.round = Math.max(1, Math.ceil(strike / 2));
@@ -156,10 +156,10 @@ export class AsteroidRun implements CockpitGame {
   tap(): void {}
   drag(): void {}
   release(): void {}
-  popOrbs(): void {}
-  resync(): void {}
+  clearIncoming(): void {}
+  onResume(): void {}
 
-  update(dt: number, frame: CockpitFrame): SectionStatus {
+  update(dt: number, frame: MiniGameFrame): MiniGameStatus {
     if (!this.running) return 'running';
     this.lastFrame = frame;
     this.active = frame.active;
@@ -235,7 +235,7 @@ export class AsteroidRun implements CockpitGame {
     return 34 + 4 * (this.round - 1) + 10 * Math.min(1, this.elapsed / this.duration);
   }
 
-  private steer(dt: number, frame: CockpitFrame): void {
+  private steer(dt: number, frame: MiniGameFrame): void {
     const perPx = DRAG_UNITS_PER_WIDTH / Math.max(1, frame.widthPx);
     this.targetX = MathUtils.clamp(this.targetX + frame.drag.x * perPx + frame.axis.x * KEY_SPEED * dt, -STEER_X, STEER_X);
     this.targetZ = MathUtils.clamp(this.targetZ + frame.drag.y * perPx + frame.axis.y * KEY_SPEED * dt, -STEER_Z, STEER_Z);

@@ -49,8 +49,11 @@ export class WaveSpawner {
     this.formationsLeft = 0;
   }
 
-  /** `time` is play time so far; `rng` drives every random choice in the wave (seeded in co-op). */
-  startWave(time: number, rng: Rng = Math.random): void {
+  /**
+   * `time` is play time so far; `rng` drives every random choice in the wave (seeded in co-op).
+   * A co-op `squad` gets proportionally more heavies (and so power orbs), spread evenly.
+   */
+  startWave(time: number, rng: Rng = Math.random, squad = 1): void {
     this.rng = rng;
     this.wave++;
     this.timer = 1.5;
@@ -59,8 +62,10 @@ export class WaveSpawner {
     this.formationsLeft = total;
     this.formationTotal = total;
     this.formationIndex = 0;
-    const slots = this.wave >= WAVES.twoTanksFromWave ? WAVES.tankSlots : [WAVES.singleTankSlot];
-    this.tankIndices = slots.map((f) => Math.floor(total * f));
+    const solo = this.wave >= WAVES.twoTanksFromWave ? WAVES.tankSlots : [WAVES.singleTankSlot];
+    const count = Math.min(solo.length * squad, Math.ceil(total / 2));
+    const slots = squad <= 1 ? solo : Array.from({ length: count }, (_, i) => (i + 0.5) / count);
+    this.tankIndices = [...new Set(slots.map((f) => Math.floor(total * f)))];
   }
 
   /** Testing: mark the current wave's formations as all sent. */

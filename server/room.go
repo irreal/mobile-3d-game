@@ -109,7 +109,7 @@ func (r *room) join(p *player) {
 	r.mu.Unlock()
 
 	log.Printf("player %d joined (%d online)", p.id, online)
-	sendEvent(p, map[string]any{"t": "welcome", "id": p.id, "players": others})
+	sendEvent(p, map[string]any{"t": "welcome", "id": p.id, "players": others, "v": protocolVersion})
 	r.broadcastEvent(map[string]any{"t": "join", "id": p.id}, p.id)
 }
 

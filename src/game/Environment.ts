@@ -553,6 +553,11 @@ export class Environment {
     return this.scroll;
   }
 
+  /** Sets the terrain scroll directly (co-op base fights keep the ground on the squad's clock). */
+  alignScroll(offset: number): void {
+    this.scroll = offset;
+  }
+
   /** Flattens the ground around terrain point (x, y); returns the world z of the flat ground. */
   setClearing(x: number, y: number, radius: number): number {
     const p = this.palette;

@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/pion/ice/v4"
@@ -57,6 +58,10 @@ func (s *rtcServer) close() {
 func (s *rtcServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST an SDP offer", http.StatusMethodNotAllowed)
+		return
+	}
+	if r.URL.Query().Get("v") != strconv.Itoa(protocolVersion) {
+		http.Error(w, "game client out of date: reload the page", http.StatusUpgradeRequired)
 		return
 	}
 	var offer webrtc.SessionDescription

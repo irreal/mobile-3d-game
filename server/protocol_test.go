@@ -10,7 +10,8 @@ func stateMsg(x, y float32, flags byte) []byte {
 	b := []byte{msgPlayerState}
 	b = binary.LittleEndian.AppendUint32(b, math.Float32bits(x))
 	b = binary.LittleEndian.AppendUint32(b, math.Float32bits(y))
-	return append(b, flags, 1, 3, 2, 7)
+	b = append(b, flags, 1, 3, 2, 7)
+	return binary.LittleEndian.AppendUint32(b, 123456)
 }
 
 func TestPlayerStateRoundTrip(t *testing.T) {
@@ -28,14 +29,20 @@ func TestPlayerStateRoundTrip(t *testing.T) {
 	if x := math.Float32frombits(binary.LittleEndian.Uint32(snap[5:9])); x != -0.5 {
 		t.Fatalf("x = %v", x)
 	}
-	if wave := snap[len(snap)-1]; wave != 7 {
+	if wave := snap[len(snap)-5]; wave != 7 {
 		t.Fatalf("wave = %d", wave)
+	}
+	if ts := binary.LittleEndian.Uint32(snap[len(snap)-4:]); ts != 123456 {
+		t.Fatalf("time = %d", ts)
 	}
 }
 
 func TestPlayerStateRejectsGarbage(t *testing.T) {
 	if _, ok := decodePlayerState([]byte{msgPlayerState, 1, 2}); ok {
 		t.Error("short message accepted")
+	}
+	if _, ok := decodePlayerState(stateMsg(0, 0, 0)[:14]); ok {
+		t.Error("version 1 state accepted")
 	}
 	if _, ok := decodePlayerState(stateMsg(float32(math.NaN()), 0, 0)); ok {
 		t.Error("NaN accepted")

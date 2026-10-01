@@ -2,6 +2,8 @@ import { MathUtils } from 'three';
 import { createDiver, createGrunt, createSprayer, createSwooper, createTank, createWeaver, disposeModel } from './models.ts';
 import type { Model } from './models.ts';
 import { createCore, createSentry } from './AlienBase.ts';
+import { randFloat } from './rng.ts';
+import type { Rng } from './rng.ts';
 
 export type EnemyKind = 'grunt' | 'weaver' | 'tank' | 'diver' | 'sprayer' | 'swooper' | 'sentry' | 'core';
 
@@ -54,9 +56,18 @@ export interface EnemyContext {
   /** 0 at start, 1 at maximum difficulty. */
   difficulty: number;
   bulletSpeed: number;
-  fire: (x: number, y: number, vx: number, vy: number) => void;
-  /** Where a diver locks on (in co-op, the same squad member on every screen). */
-  aim: (enemy: Enemy) => { x: number; y: number };
+  /**
+   * Co-op: every client runs the same enemies, so fire on a schedule that carries over frame
+   * boundaries and place each shot by how late in the frame it was due.
+   */
+  shared: boolean;
+  /** `late`: seconds since the shot was due; it should be that far along already. */
+  fire: (x: number, y: number, vx: number, vy: number, late: number) => void;
+  /**
+   * Who `enemy` shoots and dives at, as of `late` seconds ago (in co-op, the same squad member
+   * on every screen); null: nobody to aim at.
+   */
+  aim: (enemy: Enemy, late: number) => { x: number; y: number } | null;
 }
 
 const TANK_HOVER_TIME = 7;
@@ -105,6 +116,7 @@ export class Enemy {
   /** Doesn't shoot while set (base parts until the base has arrived). */
   holdFire = false;
   private shieldFlash = 0;
+  private readonly rng: Rng;
 
   constructor(
     readonly kind: EnemyKind,
@@ -115,7 +127,10 @@ export class Enemy {
     /** Multiplier on base HP (grows with each wave). */
     hpScale = 1,
     delay = 0,
+    /** Drives the fire timing (seeded per enemy in co-op, so every client shoots alike). */
+    rng: Rng = Math.random,
   ) {
+    this.rng = rng;
     const stats = ENEMY_STATS[kind];
     this.model = stats.create();
     this.baseEmissive = this.model.flashMaterials.map((m) => m.emissive.getHex());
@@ -157,14 +172,28 @@ export class Enemy {
     if (!this.started) this.begin(ctx);
     this.age += dt;
     this.prevX = this.x;
+    const x0 = this.x;
+    const y0 = this.y;
     const inPlay = this.move(dt, ctx);
 
-    const onScreen = this.y < ctx.top - 0.5;
     this.fireTimer -= dt;
-    if (this.fireTimer <= 0) {
+    if (ctx.shared) {
+      const x1 = this.x;
+      const y1 = this.y;
+      for (let shots = 0; this.fireTimer <= 0 && shots < 3; shots++) {
+        const late = -this.fireTimer;
+        this.fireTimer += this.nextFireDelay(ctx.difficulty);
+        // Fire from where it was when the shot was due, not where the frame happened to end.
+        const k = dt > 0 ? Math.min(1, late / dt) : 0;
+        this.x = x1 - (x1 - x0) * k;
+        this.y = y1 - (y1 - y0) * k;
+        if (!this.holdFire && this.y < ctx.top - 0.5) this.shoot(ctx, late);
+      }
+      this.x = x1;
+      this.y = y1;
+    } else if (this.fireTimer <= 0) {
       this.fireTimer = this.nextFireDelay(ctx.difficulty);
-      // Only shoot from on screen and from above the player, so shots are always dodgeable.
-      if (!this.holdFire && onScreen && this.y > ctx.playerY + 2.5) this.shoot(ctx);
+      if (!this.holdFire && this.y < ctx.top - 0.5) this.shoot(ctx, 0);
     }
 
     this.animate(dt);
@@ -233,12 +262,14 @@ export class Enemy {
           if (this.y <= aimY) this.motion = 'aim';
         } else if (this.motion === 'aim') {
           this.hoverTime += dt;
-          const target = ctx.aim(this);
-          const dx = target.x - this.x;
-          const dy = target.y - this.y;
-          const len = Math.hypot(dx, dy) || 1;
-          this.dirX = dx / len;
-          this.dirY = dy / len;
+          const target = ctx.aim(this, 0);
+          if (target) {
+            const dx = target.x - this.x;
+            const dy = target.y - this.y;
+            const len = Math.hypot(dx, dy) || 1;
+            this.dirX = dx / len;
+            this.dirY = dy / len;
+          }
           if (this.hoverTime > DIVER_AIM_TIME) this.motion = 'dash';
         } else {
           const speed = DIVER_DASH_SPEED * MathUtils.lerp(1, 1.2, ctx.difficulty);
@@ -251,34 +282,49 @@ export class Enemy {
         const width = 2 * Math.abs(this.startX);
         this.travelled += this.speed * dt;
         const t = this.travelled / width;
-        this.x = this.startX - Math.sign(this.startX) * this.travelled;
-        this.y = this.startY - Math.sin(Math.min(t, 1) * Math.PI) * ctx.top * 0.45;
+        const swoop = (travelled: number): void => {
+          this.x = this.startX - Math.sign(this.startX) * travelled;
+          this.y = this.startY - Math.sin(Math.min(travelled / width, 1) * Math.PI) * ctx.top * 0.45;
+        };
         if (!this.shotFired && t > 0.3) {
           this.shotFired = true;
-          if (this.y > ctx.playerY + 2.5) this.aimedShot(ctx, 1);
+          // Shared: from the point on the path where the shot was due.
+          const late = ctx.shared ? (this.travelled - 0.3 * width) / this.speed : 0;
+          swoop(ctx.shared ? 0.3 * width : this.travelled);
+          const target = ctx.aim(this, late);
+          if (target && this.y > target.y + 2.5) this.aimedShot(ctx, 1, target, late);
         }
+        swoop(this.travelled);
         return t < 1;
       }
       case 'sentry':
       case 'core':
         this.x = this.anchorX;
         this.y = this.anchorY;
-        this.dirX = ctx.playerX - this.x;
-        this.dirY = ctx.playerY - this.y;
+        {
+          const target = ctx.aim(this, 0);
+          if (target) {
+            this.dirX = target.x - this.x;
+            this.dirY = target.y - this.y;
+          }
+        }
         break;
     }
     return true;
   }
 
-  private shoot(ctx: EnemyContext): void {
+  private shoot(ctx: EnemyContext, late: number): void {
+    // Only shoot from above the target, so shots are always dodgeable.
+    const target = ctx.aim(this, late);
+    if (!target || this.y <= target.y + 2.5) return;
     const speed = ctx.bulletSpeed;
     const muzzleY = this.y - this.radius * 0.8;
     switch (this.kind) {
       case 'weaver':
-        ctx.fire(this.x, muzzleY, 0, -speed);
+        ctx.fire(this.x, muzzleY, 0, -speed, late);
         return;
       case 'grunt':
-        this.aimedShot(ctx, 1);
+        this.aimedShot(ctx, 1, target, late);
         return;
       case 'sprayer': {
         if (this.motion !== 'hover') return;
@@ -286,25 +332,27 @@ export class Enemy {
         const ringSpeed = speed * 0.7;
         for (let i = 0; i < SPRAYER_SHOTS; i++) {
           const a = this.sprayAngle + (i / SPRAYER_SHOTS) * Math.PI * 2;
-          ctx.fire(this.x, this.y, Math.cos(a) * ringSpeed, Math.sin(a) * ringSpeed);
+          ctx.fire(this.x, this.y, Math.cos(a) * ringSpeed, Math.sin(a) * ringSpeed, late);
         }
         return;
       }
       case 'tank': {
-        const aim = Math.atan2(ctx.playerY - muzzleY, ctx.playerX - this.x);
+        const aim = Math.atan2(target.y - muzzleY, target.x - this.x);
         const spread = MathUtils.degToRad(14);
         const tankSpeed = speed * 0.85;
         for (let i = -2; i <= 2; i++) {
           const a = aim + i * spread;
-          ctx.fire(this.x, muzzleY, Math.cos(a) * tankSpeed, Math.sin(a) * tankSpeed);
+          ctx.fire(this.x, muzzleY, Math.cos(a) * tankSpeed, Math.sin(a) * tankSpeed, late);
         }
         return;
       }
       case 'sentry': {
-        const aim = Math.atan2(ctx.playerY - this.y, ctx.playerX - this.x);
+        const aim = Math.atan2(target.y - this.y, target.x - this.x);
         for (let i = -1; i <= 1; i++) {
           const a = aim + i * MathUtils.degToRad(9);
-          ctx.fire(this.x + Math.cos(aim) * 0.9, this.y + Math.sin(aim) * 0.9, Math.cos(a) * speed * 0.9, Math.sin(a) * speed * 0.9);
+          const x = this.x + Math.cos(aim) * 0.9;
+          const y = this.y + Math.sin(aim) * 0.9;
+          ctx.fire(x, y, Math.cos(a) * speed * 0.9, Math.sin(a) * speed * 0.9, late);
         }
         return;
       }
@@ -317,13 +365,13 @@ export class Enemy {
           this.sprayAngle += Math.PI / count;
           for (let i = 0; i < count; i++) {
             const a = this.sprayAngle + (i / count) * Math.PI * 2;
-            ctx.fire(this.x, this.y, Math.cos(a) * speed * 0.6, Math.sin(a) * speed * 0.6);
+            ctx.fire(this.x, this.y, Math.cos(a) * speed * 0.6, Math.sin(a) * speed * 0.6, late);
           }
         } else {
-          const aim = Math.atan2(ctx.playerY - this.y, ctx.playerX - this.x);
+          const aim = Math.atan2(target.y - this.y, target.x - this.x);
           for (let i = -3; i <= 3; i++) {
             const a = aim + i * MathUtils.degToRad(11);
-            ctx.fire(this.x, this.y - 1, Math.cos(a) * speed * 0.8, Math.sin(a) * speed * 0.8);
+            ctx.fire(this.x, this.y - 1, Math.cos(a) * speed * 0.8, Math.sin(a) * speed * 0.8, late);
           }
         }
         return;
@@ -332,11 +380,11 @@ export class Enemy {
     }
   }
 
-  private aimedShot(ctx: EnemyContext, speedScale: number): void {
+  private aimedShot(ctx: EnemyContext, speedScale: number, target: { x: number; y: number }, late: number): void {
     const muzzleY = this.y - this.radius * 0.8;
-    const aim = Math.atan2(ctx.playerY - muzzleY, ctx.playerX - this.x);
+    const aim = Math.atan2(target.y - muzzleY, target.x - this.x);
     const speed = ctx.bulletSpeed * speedScale;
-    ctx.fire(this.x, muzzleY, Math.cos(aim) * speed, Math.sin(aim) * speed);
+    ctx.fire(this.x, muzzleY, Math.cos(aim) * speed, Math.sin(aim) * speed, late);
   }
 
   private animate(dt: number): void {
@@ -388,6 +436,6 @@ export class Enemy {
 
   private nextFireDelay(difficulty: number): number {
     const [min, max] = ENEMY_STATS[this.kind].fireInterval;
-    return MathUtils.randFloat(min, max) * MathUtils.lerp(1, 0.55, difficulty);
+    return randFloat(this.rng, min, max) * MathUtils.lerp(1, 0.55, difficulty);
   }
 }

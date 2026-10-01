@@ -1,17 +1,17 @@
 import { AdditiveBlending, Color, CylinderGeometry, MathUtils, Mesh, MeshBasicMaterial, Vector3 } from 'three';
-import type { PerspectiveCamera, Scene } from 'three';
-import type { Music } from '../audio/Music.ts';
-import type { Sfx } from '../audio/Sfx.ts';
-import type { Vec2 } from '../input/Input.ts';
-import type { BeamGuide, CockpitOverlay, Grade, LaneNote, NoteMarker, PhraseMode } from '../ui/CockpitOverlay.ts';
-import { COCKPIT } from './constants.ts';
-import type { Effects } from './Effects.ts';
-import { ENEMY_STATS, EXPLOSION_COLORS } from './Enemy.ts';
-import type { EnemyKind } from './Enemy.ts';
-import { replyDelayBeats } from './replyDelay.ts';
-import { createGlowMaterial, glowGeometry } from './glow.ts';
-import { disposeModel, sharedGeometries } from './models.ts';
-import type { Model } from './models.ts';
+import type { Scene } from 'three';
+import type { Music } from '../../audio/Music.ts';
+import type { Sfx } from '../../audio/Sfx.ts';
+import type { BeamGuide, CockpitOverlay, Grade, LaneNote, NoteMarker, PhraseMode } from '../../ui/CockpitOverlay.ts';
+import { COCKPIT } from '../constants.ts';
+import type { Effects } from '../Effects.ts';
+import { ENEMY_STATS, EXPLOSION_COLORS } from '../Enemy.ts';
+import type { EnemyKind } from '../Enemy.ts';
+import { replyDelayBeats } from '../replyDelay.ts';
+import { createGlowMaterial, glowGeometry } from '../glow.ts';
+import { disposeModel, sharedGeometries } from '../models.ts';
+import type { Model } from '../models.ts';
+import type { MiniGame, MiniGameCallbacks, MiniGameContext, MiniGameFrame, MiniGameStatus } from './MiniGame.ts';
 
 interface Fighter {
   kind: EnemyKind;
@@ -110,48 +110,6 @@ interface Rocket {
   lethal: boolean;
 }
 
-export type SectionStatus = 'running' | 'cleared';
-
-export interface CockpitFrame {
-  camera: PerspectiveCamera;
-  /** Unshaken eye position; return fire aims here. */
-  eye: Vector3;
-  /** True once the camera has fully arrived in the cockpit. */
-  active: boolean;
-  widthPx: number;
-  heightPx: number;
-  /** Steering this frame: drag in CSS pixels (y up), and the keyboard axis. */
-  drag: Vec2;
-  axis: Vec2;
-}
-
-/** A first-person mini-game played between waves. */
-export interface CockpitGame {
-  readonly accuracy: number;
-  readonly maxCombo: number;
-  /** Prepares strike number `strike` (1-based) ahead of the ship at (`shipX`, `shipY`). */
-  start(shipX: number, shipY: number, strike: number, aspect: number): void;
-  tap(x: number, y: number, perfMs: number): void;
-  drag(x: number, y: number): void;
-  release(): void;
-  /** Cancels incoming fire (used when the player takes a hit). */
-  popOrbs(): void;
-  update(dt: number, frame: CockpitFrame): SectionStatus;
-  /** Results card text once cleared. */
-  result(): { title: string; stats: string };
-  /** Call when the simulation resumes after being frozen. */
-  resync(): void;
-  clear(): void;
-  dispose(): void;
-}
-
-export interface CockpitCallbacks {
-  addScore: (points: number) => void;
-  playerHit: () => void;
-  /** Big explosion at a world position (screen shockwave etc.), strength ~0..1.5. */
-  blast: (position: Vector3, strength: number) => void;
-}
-
 const COCKPIT_SCORE: Record<EnemyKind, number> = {
   grunt: 200,
   weaver: 250,
@@ -231,7 +189,7 @@ const tmp2 = new Vector3();
  * Enemies that weren't hit fire back at the end of the phrase (draining the shield,
  * then lives) and warp away. Heavies stay and join the next call until destroyed.
  */
-export class CockpitSection implements CockpitGame {
+export class RhythmStrike implements MiniGame {
   private readonly fighters: Fighter[] = [];
   private readonly phrases: Phrase[] = [];
   private readonly volleys: Volley[] = [];
@@ -280,7 +238,7 @@ export class CockpitSection implements CockpitGame {
   private shield: number = COCKPIT.shield;
   private notesTotal = 0;
   private notesHit = 0;
-  private lastFrame: CockpitFrame | null = null;
+  private lastFrame: MiniGameFrame | null = null;
   combo = 0;
   maxCombo = 0;
 
@@ -290,7 +248,7 @@ export class CockpitSection implements CockpitGame {
     private readonly overlay: CockpitOverlay,
     private readonly sfx: Sfx,
     private readonly music: Music,
-    private readonly callbacks: CockpitCallbacks,
+    private readonly callbacks: MiniGameCallbacks,
   ) {}
 
   get overdrive(): boolean {
@@ -310,8 +268,7 @@ export class CockpitSection implements CockpitGame {
     return 60000 / (this.music.playing?.bpm ?? FALLBACK_BPM);
   }
 
-  /** Prepares strike number `strike` (1-based) ahead of the ship at (`shipX`, `shipY`). */
-  start(shipX: number, shipY: number, strike: number, aspect: number): void {
+  start({ shipX, shipY, strike, aspect }: MiniGameContext): void {
     this.clear();
     this.running = true;
     this.anchor.set(shipX, shipY, 0);
@@ -384,7 +341,7 @@ export class CockpitSection implements CockpitGame {
   }
 
   /** Cancels return fire in flight (used when the player takes a hit). */
-  popOrbs(): void {
+  clearIncoming(): void {
     for (const v of this.volleys) {
       for (const b of v.bolts) {
         const p = b.mesh.position;
@@ -395,7 +352,7 @@ export class CockpitSection implements CockpitGame {
     this.volleys.length = 0;
   }
 
-  update(dt: number, frame: CockpitFrame): SectionStatus {
+  update(dt: number, frame: MiniGameFrame): MiniGameStatus {
     if (!this.running) return 'running';
     this.active = frame.active;
     this.eye.copy(frame.eye);
@@ -436,7 +393,7 @@ export class CockpitSection implements CockpitGame {
     for (const b of this.beams) this.scene.remove(b.mesh);
     this.beams.length = 0;
     this.swipe = null;
-    this.popOrbs();
+    this.clearIncoming();
     this.fighters.length = 0;
     this.phrases.length = 0;
     this.rockets.length = 0;
@@ -472,7 +429,7 @@ export class CockpitSection implements CockpitGame {
    * keeps playing meanwhile, so the chart is pushed back by whole phrases on the next
    * update: nothing is missed and it stays on the music's grid.
    */
-  resync(): void {
+  onResume(): void {
     this.resyncPending = true;
   }
 
@@ -1093,7 +1050,7 @@ export class CockpitSection implements CockpitGame {
     return this.lastFrame ? this.project(f.position, f.radius, this.lastFrame) : null;
   }
 
-  private project(position: Vector3, radius: number, frame: CockpitFrame): { x: number; y: number; r: number } | null {
+  private project(position: Vector3, radius: number, frame: MiniGameFrame): { x: number; y: number; r: number } | null {
     const cam = frame.camera;
     tmp.copy(position).project(cam);
     if (tmp.z < -1 || tmp.z > 1 || Math.abs(tmp.x) > 1.1 || Math.abs(tmp.y) > 1.1) return null;
@@ -1106,7 +1063,7 @@ export class CockpitSection implements CockpitGame {
     };
   }
 
-  private updateOverlay(frame: CockpitFrame): void {
+  private updateOverlay(frame: MiniGameFrame): void {
     this.lastFrame = frame;
     this.markers.length = 0;
     this.lane.length = 0;

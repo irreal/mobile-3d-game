@@ -10,6 +10,8 @@ import (
 const (
 	// Time between announcing a wave and its start, so every client has the message in time.
 	waveLead = 1200 * time.Millisecond
+	// Time between the first player reaching a wave's alien base and the squad's base fight.
+	bossLead = 800 * time.Millisecond
 	// A wave starts this long after the first player is ready, even if others aren't yet.
 	readyTimeout = 20 * time.Second
 	// Enemy and orb ids above this are rejected (clients number them well below).
@@ -39,11 +41,15 @@ type game struct {
 	out  sender
 	rand func() uint32
 
-	wave  int
-	seed  uint32
-	atMs  int64
-	kills map[int]bool
-	picks map[int]bool
+	wave int
+	seed uint32
+	atMs int64
+	// Players in the run when the wave started; clients scale power-orb drops by it.
+	squad int
+	// When the wave's base fight starts (0: not yet).
+	bossAtMs int64
+	kills    map[int]bool
+	picks    map[int]bool
 	// Players in the run, and the wave each ready player asked for.
 	players  map[uint16]bool
 	ready    map[uint16]int
@@ -82,6 +88,17 @@ func (g *game) handle(id uint16, e clientEvent, now time.Time) {
 		}
 		seen[e.ID] = true
 		g.out.broadcast(map[string]any{"t": e.T, "w": e.W, "id": e.ID, "by": id}, id)
+	case "boss":
+		if !g.players[id] || e.W != g.wave {
+			return
+		}
+		msg := func() map[string]any { return map[string]any{"t": "boss", "w": g.wave, "at": g.bossAtMs} }
+		if g.bossAtMs == 0 {
+			g.bossAtMs = now.Add(bossLead).UnixMilli()
+			g.out.broadcast(msg(), 0)
+		} else {
+			g.out.send(id, msg())
+		}
 	case "dmg":
 		if !g.players[id] || e.W != g.wave || len(e.H) == 0 || len(e.H) > maxDamageHits {
 			return
@@ -165,6 +182,8 @@ func (g *game) startIfReady(now time.Time, force bool) {
 
 	g.wave = next
 	g.seed = g.rand()
+	g.squad = len(g.players)
+	g.bossAtMs = 0
 	g.atMs = now.Add(waveLead).UnixMilli()
 	clear(g.kills)
 	clear(g.picks)
@@ -179,6 +198,7 @@ func (g *game) waveMessage() map[string]any {
 		"w":     g.wave,
 		"seed":  g.seed,
 		"at":    g.atMs,
+		"squad": g.squad,
 		"kills": sortedKeys(g.kills),
 		"picks": sortedKeys(g.picks),
 	}
