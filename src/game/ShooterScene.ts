@@ -541,8 +541,8 @@ export class ShooterScene implements GameScene {
     this.setMusicCutoff(450, COCKPIT.enterDuration * 0.8);
     const pf = this.playfield;
     const strike = this.spawner.wave / COCKPIT.everyWaves;
-    // Strikes alternate: rhythm fight first, then an asteroid field.
-    this.cockpit = strike % 2 === 0 ? this.asteroids : this.rhythm;
+    // Strikes in deep space are asteroid fields; over a planet, rhythm dogfights.
+    this.cockpit = environmentForWave(this.spawner.wave) === 'space' ? this.asteroids : this.rhythm;
     this.cockpit.start(this.player.x, this.player.y, strike, pf.widthPx / pf.heightPx);
   }
 
@@ -588,6 +588,10 @@ export class ShooterScene implements GameScene {
     const seconds = from === 'space' ? COCKPIT.exitDuration + 2.4 : COCKPIT.exitDuration + 0.6;
     env.transitionTo(next, seconds);
     this.audio.sfx.atmosphere(seconds);
+    // Spans the camera pull-out and settles shortly after control returns.
+    const flourish = COCKPIT.exitDuration + 1.5;
+    if (from === 'space') this.player.maneuver('dive', flourish);
+    else if (next === 'space') this.player.maneuver('climb', flourish);
     const title = from === 'space' ? 'ENTERING ATMOSPHERE' : next === 'space' ? 'LEAVING ATMOSPHERE' : 'HYPERJUMP';
     this.flashMessage(title, next === 'space' ? 'Back to deep space' : env.nameOf(next), seconds);
   }

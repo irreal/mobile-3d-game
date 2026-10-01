@@ -146,7 +146,7 @@ export class AsteroidRun implements CockpitGame {
   start(_shipX: number, _shipY: number, strike: number): void {
     this.clear();
     this.running = true;
-    this.round = Math.max(1, Math.floor(strike / 2));
+    this.round = Math.max(1, Math.ceil(strike / 2));
     this.duration = 30 + 5 * (this.round - 1);
     this.shield = COCKPIT.shield;
     this.root.visible = true;
