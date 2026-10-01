@@ -1,6 +1,6 @@
 import { AdditiveBlending, Color, MathUtils, MeshBasicMaterial } from 'three';
 import type { Scene } from 'three';
-import { COOP_ALIVE, COOP_COCKPIT, COOP_FIRING } from '../net/CoopClient.ts';
+import { COOP_ALIVE, COOP_COCKPIT, COOP_FIRING, COOP_HURT } from '../net/CoopClient.ts';
 import type { RemotePlayer } from '../net/CoopClient.ts';
 import { GUN_TYPES, GUNS } from './constants.ts';
 import { InstancedPool } from './InstancedPool.ts';
@@ -16,6 +16,8 @@ interface Remote {
   fireTimer: number;
   weapons: string;
   seen: boolean;
+  /** Runs while they're recovering from a hit, to blink their hull like ours. */
+  hurtTime: number;
 }
 
 /**
@@ -38,13 +40,12 @@ export class RemoteShips {
   /** `visible` is false while the local camera isn't in the top-down view. */
   update(dt: number, players: readonly RemotePlayer[], playfield: Playfield, visible: boolean): void {
     for (const r of this.remotes.values()) r.seen = false;
-    const height = playfield.top - playfield.bottom;
     for (const p of players) {
       const r = this.remotes.get(p.id) ?? this.add(p.id);
       r.seen = true;
       const ship = r.ship;
       ship.x = p.x * playfield.halfWidth;
-      ship.y = playfield.bottom + p.y * height;
+      ship.y = p.y * playfield.arenaTop;
       const gun = GUN_TYPES[p.gun] ?? 'pulse';
       const level = MathUtils.clamp(p.gunLevel, 1, GUNS[gun].levels.length - 1);
       const key = `${gun}${level}/${p.rocketLevel}`;
@@ -53,7 +54,8 @@ export class RemoteShips {
         ship.weapons.set(gun, level, p.rocketLevel, false);
       }
       ship.destroyed = !(p.flags & COOP_ALIVE) || (p.flags & COOP_COCKPIT) !== 0 || !visible;
-      ship.sync(dt, 0);
+      r.hurtTime = p.flags & COOP_HURT ? r.hurtTime + dt : 0;
+      ship.sync(dt, r.hurtTime > 0 ? 10 - r.hurtTime : 0);
       if (!ship.destroyed && p.flags & COOP_FIRING) this.fire(r, gun, level, dt);
     }
     for (const [id, r] of this.remotes) if (!r.seen) this.remove(id);
@@ -62,6 +64,12 @@ export class RemoteShips {
     this.bolts.update(dt, (b) => !pf.isOutside(b.x, b.y, 1));
     this.bolts.mesh.visible = visible;
     this.bolts.sync();
+  }
+
+  /** Last known position of a remote ship. */
+  positionOf(id: number): { x: number; y: number } | null {
+    const ship = this.remotes.get(id)?.ship;
+    return ship ? { x: ship.x, y: ship.y } : null;
   }
 
   clear(): void {
@@ -78,7 +86,7 @@ export class RemoteShips {
       m.emissiveIntensity = 0.35;
     }
     this.scene.add(ship.object);
-    const r: Remote = { ship, fireTimer: 0, weapons: '', seen: true };
+    const r: Remote = { ship, fireTimer: 0, weapons: '', seen: true, hurtTime: 0 };
     this.remotes.set(id, r);
     return r;
   }

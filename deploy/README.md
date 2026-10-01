@@ -29,8 +29,16 @@ Press *Co-op* in the pause menu; the game connects to `https://novastrike.irreal
 default and reconnects to it on later visits. To use another server, open the game once with
 `?coop=https://host:port` (remembered) or set `VITE_COOP_SERVER` when building the client.
 
-Every connected player shares one instance for now: you see each other's ships, guns and
-fire, but each player's enemies are still their own.
+Every connected player shares one run. The server starts each wave for the whole squad
+once everyone is ready, or 20 s after the first player is. It sends a seed and a start time,
+and every client simulates the same enemies in step with the server clock. Damage, kills
+and power-orb pickups are shared, and the server makes sure each kill or pickup counts once.
+Scores and lives are personal. A player who joins mid-wave, or comes back from the pause
+menu, fast-forwards to where the squad is. In co-op the arena is the narrowest width any
+screen shows.
+
+Redeploy the game container after updating: the client and server must speak the same
+protocol.
 
 ## Running the server without Docker
 

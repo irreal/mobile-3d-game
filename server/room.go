@@ -23,16 +23,20 @@ type player struct {
 	last     playerState
 }
 
-// room is the single shared game instance: it relays every player's ship state to the others.
+// room is the single shared game instance: it relays every player's ship state to the others
+// and runs the shared game.
 type room struct {
 	mu         sync.Mutex
 	players    map[uint16]*player
 	nextID     uint16
 	maxPlayers int
+	game       *game
 }
 
 func newRoom(maxPlayers int) *room {
-	return &room{players: map[uint16]*player{}, maxPlayers: maxPlayers}
+	r := &room{players: map[uint16]*player{}, maxPlayers: maxPlayers}
+	r.game = newGame(r)
+	return r
 }
 
 func (r *room) count() int {
@@ -69,6 +73,7 @@ func (r *room) remove(p *player) {
 		return
 	}
 	_ = p.pc.Close()
+	r.game.leave(p.id, time.Now())
 	if wasJoined {
 		log.Printf("player %d left (%d online)", p.id, r.count())
 		r.broadcastEvent(map[string]any{"t": "leave", "id": p.id}, p.id)
@@ -120,16 +125,29 @@ func (r *room) updateState(p *player, msg []byte) {
 }
 
 func (r *room) handleEvent(p *player, msg []byte) {
-	var e struct {
-		T string  `json:"t"`
-		C float64 `json:"c"`
-	}
+	var e clientEvent
 	if json.Unmarshal(msg, &e) != nil {
 		return
 	}
 	if e.T == "ping" {
 		sendEvent(p, map[string]any{"t": "pong", "c": e.C, "s": time.Now().UnixMilli()})
+		return
 	}
+	r.game.handle(p.id, e, time.Now())
+}
+
+// send delivers an event to one player (for the game).
+func (r *room) send(id uint16, v any) {
+	r.mu.Lock()
+	p := r.players[id]
+	r.mu.Unlock()
+	if p != nil && p.joined {
+		sendEvent(p, v)
+	}
+}
+
+func (r *room) broadcast(v any, except uint16) {
+	r.broadcastEvent(v, except)
 }
 
 func (r *room) broadcastEvent(v any, except uint16) {
@@ -169,6 +187,7 @@ func (r *room) run(ctx context.Context, interval time.Duration) {
 			return
 		case <-ticker.C:
 		}
+		r.game.tick(time.Now())
 		states = states[:0]
 		targets = targets[:0]
 		r.mu.Lock()

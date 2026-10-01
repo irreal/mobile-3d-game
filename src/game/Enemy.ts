@@ -55,6 +55,8 @@ export interface EnemyContext {
   difficulty: number;
   bulletSpeed: number;
   fire: (x: number, y: number, vx: number, vy: number) => void;
+  /** Where a diver locks on (in co-op, the same squad member on every screen). */
+  aim: (enemy: Enemy) => { x: number; y: number };
 }
 
 const TANK_HOVER_TIME = 7;
@@ -74,6 +76,8 @@ export class Enemy {
   x: number;
   y: number;
   age = 0;
+  /** Same on every co-op client for the same enemy (0 when unnumbered). */
+  netId = 0;
 
   private readonly speed: number;
   private fireTimer: number;
@@ -142,9 +146,12 @@ export class Enemy {
 
   /** Returns true while the enemy is still in play. */
   update(dt: number, ctx: EnemyContext): boolean {
-    if (this.wait > 0) {
+    if (this.wait !== 0) {
       this.wait -= dt;
       if (this.wait > 0) return true;
+      // Only the part of the frame after it entered (a negative delay means it's already in).
+      dt = -this.wait;
+      this.wait = 0;
       this.model.object.visible = true;
     }
     if (!this.started) this.begin(ctx);
@@ -226,8 +233,9 @@ export class Enemy {
           if (this.y <= aimY) this.motion = 'aim';
         } else if (this.motion === 'aim') {
           this.hoverTime += dt;
-          const dx = ctx.playerX - this.x;
-          const dy = ctx.playerY - this.y;
+          const target = ctx.aim(this);
+          const dx = target.x - this.x;
+          const dy = target.y - this.y;
           const len = Math.hypot(dx, dy) || 1;
           this.dirX = dx / len;
           this.dirY = dy / len;

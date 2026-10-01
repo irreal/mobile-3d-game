@@ -11,7 +11,7 @@ import (
 //
 //	u8 type | f32 x | f32 y | u8 flags | u8 gun | u8 gunLevel | u8 rocketLevel | u8 wave
 //
-// x is -1..1 across the playfield and y 0..1 from its bottom, so screens of any aspect agree.
+// x is -1..1 across the shared arena and y is world y over the arena's half height (about -1..1).
 //
 // Server → client, msgSnapshot:
 //
@@ -21,7 +21,12 @@ import (
 //
 //	server → client: {"t":"welcome","id":1,"players":[2,3]} {"t":"join","id":4} {"t":"leave","id":2}
 //	                 {"t":"pong","c":<client ms>,"s":<server ms>}
+//	                 {"t":"wave","w":3,"seed":<u32>,"at":<server ms>,"kills":[ids],"picks":[ids]}
+//	                 {"t":"kill"|"pick","w":3,"id":17,"by":2} {"t":"dmg","w":3,"by":2,"h":[[id,damage],…]}
+//	                 {"t":"out","id":2,"quit":false} (game over; quit: disconnected)
 //	client → server: {"t":"ping","c":<client ms>}
+//	                 {"t":"ready","w":<wave wanted>} {"t":"out"} (game over)
+//	                 {"t":"kill"|"pick","w":3,"id":17} {"t":"dmg","w":3,"h":[[id,damage],…]}
 const (
 	msgPlayerState = 1
 	msgSnapshot    = 2

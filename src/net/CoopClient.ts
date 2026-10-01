@@ -1,8 +1,9 @@
 /**
  * Co-op connection to the game server over WebRTC data channels: an unreliable, unordered
  * "state" channel for ship positions (UDP-like, no head-of-line blocking) and a reliable
- * "events" channel for joins, leaves and pings. Signalling is one HTTPS POST of the offer.
- * See server/protocol.go for the wire format.
+ * "events" channel for joins, leaves, pings and the shared game (wave starts, kills, damage,
+ * orb pickups). Signalling is one HTTPS POST of the offer. See server/protocol.go for the wire
+ * format.
  */
 
 export type CoopStatus = 'off' | 'connecting' | 'online' | 'error';
@@ -11,11 +12,13 @@ export type CoopStatus = 'off' | 'connecting' | 'online' | 'error';
 export const COOP_ALIVE = 1;
 export const COOP_FIRING = 2;
 export const COOP_COCKPIT = 4;
+/** Recovering from a hit (blinking). */
+export const COOP_HURT = 8;
 
 export interface CoopShipState {
-  /** -1..1 across the playfield. */
+  /** -1..1 across the shared arena. */
   x: number;
-  /** 0..1 from the bottom of the playfield. */
+  /** World y over the arena's half height. */
   y: number;
   flags: number;
   gun: number;
@@ -27,6 +30,14 @@ export interface CoopShipState {
 export interface RemotePlayer extends CoopShipState {
   id: number;
 }
+
+/** Shared-game messages from the server (see server/game.go). */
+export type CoopGameEvent =
+  | { t: 'wave'; w: number; seed: number; at: number; kills: number[]; picks: number[] }
+  | { t: 'kill' | 'pick'; w: number; id: number; by: number }
+  | { t: 'dmg'; w: number; by: number; h: [number, number][] }
+  /** A squadmate's game ended (`quit`: they disconnected rather than being shot down). */
+  | { t: 'out'; id: number; quit?: boolean };
 
 interface Sample extends CoopShipState {
   t: number;
@@ -40,6 +51,9 @@ const SEND_INTERVAL_MS = 1000 / 30;
 const INTERPOLATION_DELAY_MS = 100;
 const STALE_MS = 3000;
 const PING_INTERVAL_MS = 2000;
+/** Quick pings right after connecting, so the clock is synced before the first wave. */
+const FIRST_PINGS_MS = [250, 500, 800];
+const CLOCK_SAMPLES = 10;
 const RECONNECT_MS = 3000;
 const GATHER_TIMEOUT_MS = 1000;
 const ICE_SERVERS: RTCIceServer[] = [{ urls: 'stun:stun.cloudflare.com:3478' }];
@@ -52,6 +66,7 @@ export class CoopClient {
   rttMs = 0;
   error = '';
   onChange: (() => void) | null = null;
+  onGame: ((e: CoopGameEvent) => void) | null = null;
 
   private url = '';
   private pc: RTCPeerConnection | null = null;
@@ -63,7 +78,11 @@ export class CoopClient {
   private lastSend = 0;
   private pingTimer = 0;
   private reconnectTimer = 0;
+  private firstPings: number[] = [];
   private wanted = false;
+  /** Recent (round trip, server minus local clock) samples; the quickest round trip is trusted. */
+  private clockSamples: { rtt: number; offset: number }[] = [];
+  private clockOffset = Date.now() - performance.now();
 
   /** Players connected besides us. */
   get others(): number {
@@ -80,6 +99,19 @@ export class CoopClient {
     this.wanted = false;
     this.teardown();
     this.setStatus('off');
+  }
+
+  /** Server clock (Unix ms), from the local clock and the best ping sample. */
+  serverNow(now = performance.now()): number {
+    return now + this.clockOffset;
+  }
+
+  /** Sends a shared-game message; false if offline. */
+  send(event: Record<string, unknown>): boolean {
+    const dc = this.eventsChannel;
+    if (this.status !== 'online' || !dc || dc.readyState !== 'open') return false;
+    dc.send(JSON.stringify(event));
+    return true;
   }
 
   /** Call every frame with the local ship; sends at most 30 times a second. */
@@ -139,6 +171,7 @@ export class CoopClient {
       events.onopen = () => {
         this.setStatus('online');
         this.ping();
+        this.firstPings = FIRST_PINGS_MS.map((ms) => window.setTimeout(() => this.ping(), ms));
         this.pingTimer = window.setInterval(() => this.ping(), PING_INTERVAL_MS);
       };
       pc.onconnectionstatechange = () => {
@@ -171,6 +204,9 @@ export class CoopClient {
   private teardown(): void {
     window.clearInterval(this.pingTimer);
     window.clearTimeout(this.reconnectTimer);
+    for (const t of this.firstPings) window.clearTimeout(t);
+    this.firstPings = [];
+    this.clockSamples = [];
     const pc = this.pc;
     this.pc = null;
     this.stateChannel = null;
@@ -195,13 +231,20 @@ export class CoopClient {
   }
 
   private onEvent(text: string): void {
-    let e: { t?: string; id?: number; players?: number[]; c?: number };
+    let e: { t?: string; id?: number; players?: number[]; c?: number; s?: number };
     try {
       e = JSON.parse(text) as typeof e;
     } catch {
       return;
     }
     switch (e.t) {
+      case 'wave':
+      case 'kill':
+      case 'pick':
+      case 'dmg':
+      case 'out':
+        this.onGame?.(e as CoopGameEvent);
+        return;
       case 'welcome':
         this.id = e.id ?? 0;
         for (const id of e.players ?? []) this.known.add(id);
@@ -216,12 +259,26 @@ export class CoopClient {
         }
         break;
       case 'pong':
-        if (typeof e.c === 'number') this.rttMs = Math.round(performance.now() - e.c);
+        if (typeof e.c === 'number') {
+          const now = performance.now();
+          const rtt = now - e.c;
+          this.rttMs = Math.round(rtt);
+          if (typeof e.s === 'number') this.addClockSample(rtt, e.s + rtt / 2 - now);
+        }
         break;
       default:
         return;
     }
     this.onChange?.();
+  }
+
+  private addClockSample(rtt: number, offset: number): void {
+    const samples = this.clockSamples;
+    samples.push({ rtt, offset });
+    if (samples.length > CLOCK_SAMPLES) samples.shift();
+    let best = samples[0]!;
+    for (const s of samples) if (s.rtt < best.rtt) best = s;
+    this.clockOffset = best.offset;
   }
 
   private onSnapshot(data: ArrayBuffer): void {

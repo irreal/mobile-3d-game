@@ -52,7 +52,9 @@ import type { EnvironmentId } from './Environment.ts';
 import type { EnemyContext, EnemyKind } from './Enemy.ts';
 import { InstancedPool } from './InstancedPool.ts';
 import { RemoteShips } from './RemoteShips.ts';
-import { COOP_ALIVE, COOP_COCKPIT, COOP_FIRING, CoopClient, coopServerUrl, loadCoop, saveCoop } from '../net/CoopClient.ts';
+import { COOP_ALIVE, COOP_COCKPIT, COOP_FIRING, COOP_HURT, CoopClient, coopServerUrl, loadCoop, saveCoop } from '../net/CoopClient.ts';
+import type { CoopGameEvent, RemotePlayer } from '../net/CoopClient.ts';
+import { seededRng } from './rng.ts';
 import { createPowerup, disposeModel, POWERUP_COLORS, POWERUP_KINDS, sharedGeometries } from './models.ts';
 import type { PowerupKind, PowerupModel } from './models.ts';
 import { Playfield } from './Playfield.ts';
@@ -72,11 +74,12 @@ export interface GameUi {
 }
 
 /**
- * Phases while playing:
+ * Phases while playing (in co-op, each wave starts with sync: waiting for the squad):
  * shmup → [bossApproach → boss → bossDown: alien base at the end of a planet] → waveClear (wave done, brief breather) → toCockpit (camera flies in) → hudBoot
  * (cockpit HUD powers on) → cockpit (first-person fight) → sectionEnd (results) → toShmup (camera flies out) → next wave.
  */
 type Phase =
+  | 'sync'
   | 'shmup'
   | 'bossApproach'
   | 'boss'
@@ -101,6 +104,8 @@ const HIDE_SHIP_FROM_BLEND = 0.97;
 const SECTION_END_PAUSE = 1.6;
 
 interface Powerup {
+  /** The heavy that dropped it, so co-op pickups count once. */
+  netId: number;
   /** Index into POWERUP_KINDS of the colour it is right now. */
   kindIndex: number;
   model: PowerupModel;
@@ -135,6 +140,24 @@ const UPGRADE_TIME_SCALE = 0.06;
 /** Victory: when the "mission complete" card appears, and when a tap restarts. */
 const VICTORY_MESSAGE_AT = 4;
 const VICTORY_INPUT_AT = 7;
+
+/** A co-op wave: started by the server at `at` (server ms) for the whole squad. */
+interface NetWave {
+  w: number;
+  at: number;
+}
+/** Co-op play time credited per wave, so difficulty matches on every client. */
+const NET_WAVE_TIME = 40;
+/** Further behind the squad's clock than this, the world fast-forwards (after a pause or a late join). */
+const NET_CATCH_UP = 0.5;
+const NET_STEP = 1 / 30;
+/** Give up on the squad and play the wave solo if the server doesn't start it by then. */
+const NET_SYNC_TIMEOUT = 25;
+const NET_DAMAGE_INTERVAL = 0.05;
+/** Shared-arena spawns start a little higher, so tall phone screens don't see them pop in. */
+const SHARED_SPAWN_LIFT = 2.5;
+const NET_BOSS_ID = 1000;
+const NET_HANGAR_ID = 2000;
 
 export class ShooterScene implements GameScene {
   readonly scene = new Scene();
@@ -237,6 +260,26 @@ export class ShooterScene implements GameScene {
   private shownWeapons = '';
   private victoryTime = 0;
   private victoryMessageShown = false;
+  /** The co-op wave being played in step with the squad, or null in solo play. */
+  private net: NetWave | null = null;
+  /** Wave asked of the server while in `sync`. */
+  private netWanted = 0;
+  /** Set by the testing shortcuts: the rest of this game is solo even when online. */
+  private netSolo = false;
+  /** Seconds of the current co-op wave simulated so far. */
+  private netClock = 0;
+  /** Enemies spawned this wave; numbers them identically on every client. */
+  private spawnCount = 0;
+  private hangarCount = 0;
+  private netKills = new Set<number>();
+  private netPicks = new Set<number>();
+  /** Damage dealt to enemies since the last report to the squad. */
+  private readonly netDamage = new Map<number, number>();
+  private netDamageTimer = 0;
+  /** Fast-forwarding to the squad's clock: enemies hold fire. */
+  private catchingUp = false;
+  private remotePlayers: RemotePlayer[] = [];
+  private readonly aimPoint = { x: 0, y: 0 };
   private readonly hud: Hud;
   private readonly cockpitOverlay: CockpitOverlay;
   private readonly pauseMenu: PauseMenu;
@@ -342,9 +385,11 @@ export class ShooterScene implements GameScene {
       difficulty: 0,
       bulletSpeed: ENEMY_BULLET.speedMin,
       fire: (x, y, vx, vy) => {
+        if (this.catchingUp) return;
         this.enemyBullets.spawn(x, y, vx, vy, ENEMY_BULLET.radius);
         this.audio.sfx.enemyShot();
       },
+      aim: (enemy) => this.aimFor(enemy),
     };
 
     this.unsubscribeTap = input.onTap(this.handleTap);
@@ -357,6 +402,7 @@ export class ShooterScene implements GameScene {
     });
     this.unsubscribeRelease = input.onRelease(() => this.cockpit.release());
     this.coop.onChange = () => this.pauseMenu.refresh();
+    this.coop.onGame = (e) => this.onCoopEvent(e);
     window.addEventListener('pagehide', () => this.coop.disconnect());
     const saved = loadCoop();
     const url = coopServerUrl();
@@ -377,6 +423,9 @@ export class ShooterScene implements GameScene {
 
   update(realDt: number): void {
     this.input.update();
+    const halfWidth = this.playfield.halfWidth;
+    this.playfield.setShared(this.coop.status !== 'off');
+    if (this.playfield.halfWidth !== halfWidth && this.state === 'playing') this.clampPlayer();
     if (this.frozen) {
       this.cockpit.resync();
       this.input.consumeDrag(this.drag);
@@ -387,11 +436,12 @@ export class ShooterScene implements GameScene {
     }
     this.updateUpgradeCinematic(realDt);
     const dt = realDt * this.timeScale;
+    const worldDt = this.worldDt(dt);
     this.stateTime += dt;
 
     const playing = this.state === 'playing';
     if (playing) {
-      this.updatePhase(dt);
+      this.updatePhase(dt, worldDt);
     } else if (this.state === 'victory') {
       this.input.consumeDrag(this.drag);
       this.updateVictory(dt);
@@ -404,9 +454,11 @@ export class ShooterScene implements GameScene {
     }
 
     this.updateBase(dt);
-    this.updateEnemies(dt);
+    this.updateEnemies(worldDt);
+    // After moving enemies, so new ones aren't also aged by this whole frame.
+    if (playing && this.phase === 'shmup') this.spawner.update(worldDt, this.playfield.halfWidth, this.spawnEnemy);
     this.updateBullets(dt);
-    this.updatePowerups(dt);
+    this.updatePowerups(worldDt);
     if (playing && this.phase !== 'toCockpit' && this.phase !== 'cockpit') this.checkCollisions();
 
     this.invulnerable = Math.max(0, this.invulnerable - dt);
@@ -464,15 +516,24 @@ export class ShooterScene implements GameScene {
     }
   }
 
-  private updatePhase(dt: number): void {
+  private updatePhase(dt: number, worldDt: number): void {
     this.phaseTime += dt;
     const difficulty = Math.min(this.time / DIFFICULTY_RAMP_TIME, 1);
 
     switch (this.phase) {
+      case 'sync':
+        this.steerPlayer(dt);
+        if (this.coop.status !== 'online' || this.phaseTime > NET_SYNC_TIMEOUT) {
+          this.beginWave(null);
+        } else if (this.phaseTime > 0.6 && this.messageTimer <= 0) {
+          const others = this.coop.others;
+          this.flashMessage('WAITING FOR SQUAD', `Wave ${this.netWanted} starts when everyone is ready${others ? ` · ${others + 1} online` : ''}`, 60);
+        }
+        break;
+
       case 'shmup':
-        this.time += dt;
+        this.time += worldDt;
         this.updatePlayer(dt);
-        this.spawner.update(dt, this.time, difficulty, this.playfield.halfWidth, this.spawnEnemy);
         if (this.spawner.done && this.enemies.length === 0 && this.isBaseWave && !this.bossDefeated) {
           this.startBoss();
         } else if (this.spawner.done && this.enemies.length === 0) {
@@ -561,6 +622,7 @@ export class ShooterScene implements GameScene {
 
   /** Testing shortcut (pause menu): skip straight to cockpit strike `strike` of the current game. */
   private jumpToCockpit(strike: number): void {
+    this.goSolo();
     this.closePause();
     this.tutorial.cancel();
     this.clearWorld();
@@ -577,6 +639,7 @@ export class ShooterScene implements GameScene {
 
   /** Testing shortcut (pause menu): skip to the alien base at the end of planet `planet`. */
   private jumpToBase(planet: number): void {
+    this.goSolo();
     this.closePause();
     this.tutorial.cancel();
     this.clearWorld();
@@ -613,7 +676,9 @@ export class ShooterScene implements GameScene {
   private planetApproach(): number {
     if (this.state === 'title' || this.spawner.wave === 0) return 0;
     const inPair = (this.spawner.wave - 1) % 2;
-    if (this.phase === 'shmup' || this.phase === 'waveClear') return ((inPair + this.spawner.progress) / 2) * 0.7;
+    if (this.phase === 'shmup' || this.phase === 'waveClear' || this.phase === 'sync') {
+      return ((inPair + this.spawner.progress) / 2) * 0.7;
+    }
     return 0.75;
   }
 
@@ -625,8 +690,10 @@ export class ShooterScene implements GameScene {
   // --- Upgrade close-up ------------------------------------------------------------------
 
   private startUpgradeCinematic(): void {
-    if (this.director.blend > 0 || this.state !== 'playing' || this.upgradeTime >= 0) {
+    // Co-op can't slow time for one player: just install the part.
+    if (this.director.blend > 0 || this.state !== 'playing' || this.upgradeTime >= 0 || this.net) {
       this.syncWeapons(true);
+      if (this.net) this.audio.sfx.install();
       return;
     }
     this.upgradeTime = 0;
@@ -681,6 +748,7 @@ export class ShooterScene implements GameScene {
   // --- Victory ---------------------------------------------------------------------------
 
   private startVictory(): void {
+    this.leaveSquad();
     this.cancelUpgradeCinematic();
     this.state = 'victory';
     this.stateTime = 0;
@@ -726,6 +794,7 @@ export class ShooterScene implements GameScene {
 
   /** Testing shortcut (pause menu): play the ending. */
   private jumpToVictory(): void {
+    this.goSolo();
     this.closePause();
     this.tutorial.cancel();
     this.clearWorld();
@@ -745,7 +814,7 @@ export class ShooterScene implements GameScene {
 
   private startBoss(): void {
     const env = this.environment;
-    const startY = this.playfield.top + 14;
+    const startY = this.playfield.arenaTop + 14;
     this.baseTerrainY = startY + env.scrollOffset;
     const groundZ = env.setClearing(0, this.baseTerrainY, BASE_CLEARING);
     this.base = new AlienBase(groundZ);
@@ -754,8 +823,10 @@ export class ShooterScene implements GameScene {
     this.scene.add(this.base.object);
     const hpScale = 1 + WAVES.hpGrowthPerWave * (this.spawner.wave - 1);
     const difficulty = Math.min(this.time / DIFFICULTY_RAMP_TIME, 1);
+    let parts = 0;
     const part = (kind: EnemyKind, dx: number, dy: number): Enemy => {
       const e = new Enemy(kind, dx, startY + dy, 0, difficulty, hpScale);
+      e.netId = NET_BOSS_ID + parts++;
       e.holdFire = true;
       this.enemies.push(e);
       this.scene.add(e.object);
@@ -792,7 +863,7 @@ export class ShooterScene implements GameScene {
   private updateBoss(dt: number, difficulty: number): void {
     const base = this.base;
     if (!base) return;
-    const rest = this.playfield.top * BASE_REST;
+    const rest = this.playfield.arenaTop * BASE_REST;
     if (this.phase === 'bossApproach') {
       const d = Math.max(0, base.y - rest);
       this.scrollFactor = Math.min(1, Math.sqrt(d / BASE_BRAKE_DISTANCE));
@@ -828,7 +899,10 @@ export class ShooterScene implements GameScene {
     for (const [dx, dy] of HANGAR_OFFSETS) {
       const x = base.x + dx;
       const y = base.y + dy;
-      const e = new Enemy(kind, x, y, Math.random() * Math.PI * 2, difficulty, hpScale);
+      const netId = NET_HANGAR_ID + this.hangarCount++;
+      if (this.net && this.netKills.has(netId)) continue;
+      const e = new Enemy(kind, x, y, (netId * 2.4) % (Math.PI * 2), difficulty, hpScale);
+      e.netId = netId;
       this.enemies.push(e);
       this.scene.add(e.object);
       this.effects.flash(x, y, 0, 0xffa040, 4, 0.35);
@@ -846,8 +920,8 @@ export class ShooterScene implements GameScene {
     this.score += bonus;
     this.flashMessage('BASE DESTROYED', `+${bonus.toLocaleString('en-US')}`, BASE_DOWN_TIME);
     this.popEnemyBullets();
-    // Everything it launched goes down with it.
-    for (let i = this.enemies.length - 1; i >= 0; i--) this.killEnemy(i);
+    // Everything it launched goes down with it (on every screen, so no need to report it).
+    for (let i = this.enemies.length - 1; i >= 0; i--) this.killEnemy(i, 'cascade');
     base?.wreck();
     this.bossBursts = [0, 0.2, 0.35, 0.55, 0.7, 0.9, 1.1, 1.35, 1.6, 1.9, 2.3, 2.8];
     this.shake = 1.2;
@@ -940,11 +1014,42 @@ export class ShooterScene implements GameScene {
     this.audio.sfx.squadronCleared();
   }
 
+  /** In co-op, waits for the server to start the wave for the whole squad. */
   private startNextWave(): void {
+    if (this.coop.status !== 'online' || this.netSolo) {
+      this.beginWave(null);
+      return;
+    }
+    this.net = null;
+    this.netWanted = this.spawner.wave + 1;
+    this.setPhase('sync');
+    this.scrollFactor = 1;
+    if (!this.coop.send({ t: 'ready', w: this.netWanted })) this.beginWave(null);
+  }
+
+  /** `net` starts the squad's wave (which may be ahead of ours, joining late); null plays solo. */
+  private beginWave(net: Extract<CoopGameEvent, { t: 'wave' }> | null): void {
     this.setPhase('shmup');
     this.bossDefeated = false;
     this.scrollFactor = 1;
-    this.spawner.startWave();
+    this.spawnCount = 0;
+    this.hangarCount = 0;
+    this.netDamage.clear();
+    if (net) {
+      if (net.w !== this.spawner.wave + 1) {
+        this.spawner.wave = net.w - 1;
+        this.environment.set(environmentForWave(net.w));
+      }
+      this.net = { w: net.w, at: net.at };
+      this.netClock = 0;
+      this.netKills = new Set(net.kills);
+      this.netPicks = new Set(net.picks);
+      this.time = (net.w - 1) * NET_WAVE_TIME;
+      this.spawner.startWave(this.time, seededRng(net.seed));
+    } else {
+      this.net = null;
+      this.spawner.startWave(this.time);
+    }
     this.fireTimer = 0;
     this.audio.music.play(NOVA_DRIVE, 0.8);
     this.audio.engine.setMusicLevel(MUSIC_LEVEL, 1);
@@ -979,6 +1084,7 @@ export class ShooterScene implements GameScene {
   }
 
   private quitToTitle(): void {
+    this.leaveSquad();
     this.tutorial.cancel();
     this.clearWorld();
     this.cockpit.clear();
@@ -1045,6 +1151,8 @@ export class ShooterScene implements GameScene {
 
   private startGame(): void {
     this.audio.sfx.start();
+    this.leaveSquad();
+    this.netSolo = false;
     this.clearWorld();
     this.state = 'playing';
     this.stateTime = 0;
@@ -1073,6 +1181,7 @@ export class ShooterScene implements GameScene {
   }
 
   private gameOver(): void {
+    this.leaveSquad();
     this.state = 'gameover';
     this.stateTime = 0;
     this.player.object.visible = false;
@@ -1286,9 +1395,14 @@ export class ShooterScene implements GameScene {
   }
 
   private readonly spawnEnemy = (kind: EnemyKind, x: number, yOffset: number, phase: number, delay = 0): void => {
-    const difficulty = Math.min(this.time / DIFFICULTY_RAMP_TIME, 1);
+    const netId = ++this.spawnCount;
+    // Already shot down by the squad (we're catching up).
+    if (this.net && this.netKills.has(netId)) return;
+    const pf = this.playfield;
     const hpScale = 1 + WAVES.hpGrowthPerWave * (this.spawner.wave - 1);
-    const enemy = new Enemy(kind, x, this.playfield.top + 2 + yOffset, phase, difficulty, hpScale, delay);
+    const y = pf.arenaTop + 2 + yOffset + (pf.shared ? SHARED_SPAWN_LIFT : 0);
+    const enemy = new Enemy(kind, x, y, phase, this.spawner.difficulty, hpScale, delay);
+    enemy.netId = netId;
     this.enemies.push(enemy);
     this.scene.add(enemy.object);
   };
@@ -1298,7 +1412,7 @@ export class ShooterScene implements GameScene {
     const difficulty = Math.min(this.time / DIFFICULTY_RAMP_TIME, 1);
     ctx.playerX = this.player.x;
     ctx.playerY = this.state === 'playing' ? this.player.y : this.playfield.bottom - 10;
-    ctx.top = this.playfield.top;
+    ctx.top = this.playfield.arenaTop;
     ctx.halfWidth = this.playfield.halfWidth;
     ctx.difficulty = difficulty;
     ctx.bulletSpeed = MathUtils.lerp(ENEMY_BULLET.speedMin, ENEMY_BULLET.speedMax, difficulty);
@@ -1375,8 +1489,8 @@ export class ShooterScene implements GameScene {
         p.x = Math.sign(p.x) * edge;
         p.vx = -p.vx;
       }
-      if (p.y > this.playfield.top - 1.2) {
-        p.y = this.playfield.top - 1.2;
+      if (p.y > this.playfield.arenaTop - 1.2) {
+        p.y = this.playfield.arenaTop - 1.2;
         p.vy = -Math.abs(p.vy);
       }
       p.cycleTimer -= dt;
@@ -1411,8 +1525,7 @@ export class ShooterScene implements GameScene {
         const spent = --b.pierce <= 0 || e.shielded;
         this.effects.explode(b.x, b.y + 0.3, [GUNS[this.gunType].color, 0xffffff], 3, 5, 0.25);
         if (spent) this.playerBullets.remove(i);
-        if (e.hit(b.damage)) this.killEnemy(j);
-        else this.audio.sfx.hit();
+        this.damageEnemy(j, b.damage);
         break;
       }
     }
@@ -1441,7 +1554,7 @@ export class ShooterScene implements GameScene {
       const e = this.enemies[j];
       if (!e?.active || !circlesOverlap(e.x, e.y, e.radius * 0.8, px, py, PLAYER.hitRadius)) continue;
       if (this.invulnerable > 0) continue;
-      if (e.hit(6)) this.killEnemy(j);
+      this.damageEnemy(j, 6, false);
       this.damagePlayer();
       if (this.state !== 'playing') return;
     }
@@ -1451,6 +1564,10 @@ export class ShooterScene implements GameScene {
       const p = this.powerups[i]!;
       if (!circlesOverlap(p.x, p.y, 0.45, px, py, PLAYER.pickupRadius)) continue;
       const kind = POWERUP_KINDS[p.kindIndex]!;
+      if (this.net) {
+        this.netPicks.add(p.netId);
+        this.coop.send({ t: 'pick', w: this.net.w, id: p.netId });
+      }
       this.audio.sfx.powerup();
       if (this.applyPowerup(kind)) this.startUpgradeCinematic();
       this.effects.explode(p.x, p.y, [POWERUP_COLORS[kind], 0xffffff], 16, 6, 0.4);
@@ -1461,11 +1578,31 @@ export class ShooterScene implements GameScene {
     }
   }
 
-  private killEnemy(index: number): void {
+  /** Our hit on an enemy; in co-op the damage is shared with the squad. */
+  private damageEnemy(index: number, damage: number, sound = true): void {
     const e = this.enemies[index]!;
-    this.score += e.score;
+    if (e.hit(damage)) {
+      this.killEnemy(index);
+      return;
+    }
+    if (sound) this.audio.sfx.hit();
+    if (this.net && !e.shielded) this.netDamage.set(e.netId, (this.netDamage.get(e.netId) ?? 0) + damage);
+  }
+
+  /**
+   * `local`: we shot it (scores, and tells the squad). `remote`: a squadmate did. `cascade`: it
+   * went down with the base, on every screen at once.
+   */
+  private killEnemy(index: number, source: 'local' | 'remote' | 'cascade' = 'local'): void {
+    const e = this.enemies[index]!;
+    if (source !== 'remote') this.score += e.score;
+    if (this.net) {
+      this.netKills.add(e.netId);
+      this.netDamage.delete(e.netId);
+      if (source === 'local') this.coop.send({ t: 'kill', w: this.net.w, id: e.netId });
+    }
     if (e.kind === 'core' && e === this.bossCore) {
-      this.score += e.score;
+      if (source !== 'remote') this.score += e.score;
       this.removeEnemyAt(index);
       this.destroyBase();
       return;
@@ -1478,7 +1615,7 @@ export class ShooterScene implements GameScene {
       this.blast(tmpVec.set(e.x, e.y, 0), 1);
     }
     this.audio.sfx.explosion(big ? 'big' : 'small');
-    if (e.kind === 'tank') this.spawnPowerup(e.x, e.y);
+    if (e.kind === 'tank') this.spawnPowerup(e.x, e.y, e.netId);
     this.removeEnemyAt(index);
   }
 
@@ -1493,9 +1630,7 @@ export class ShooterScene implements GameScene {
     }
     for (const e of victims) {
       const index = this.enemies.indexOf(e);
-      if (index < 0) continue;
-      if (e.hit(e === target ? ROCKET.damage : ROCKET.splashDamage)) this.killEnemy(index);
-      else this.audio.sfx.hit();
+      if (index >= 0) this.damageEnemy(index, e === target ? ROCKET.damage : ROCKET.splashDamage);
     }
   }
 
@@ -1550,13 +1685,17 @@ export class ShooterScene implements GameScene {
   }
 
   /** Orbs start on the current gun's colour or rockets, alternately, then cycle. */
-  private spawnPowerup(x: number, y: number): void {
+  private spawnPowerup(x: number, y: number, netId: number): void {
+    if (this.net && this.netPicks.has(netId)) return;
     const model = createPowerup();
     model.object.position.set(x, y, 0);
     this.scene.add(model.object);
     if (this.drops === 0) this.flashMessage('POWER ORB', 'Its colour cycles · match your gun to upgrade', 2);
-    const first = this.drops++ % 2 === 0 ? 'rocket' : this.gunType;
+    // The squad's orbs start on the same colour everywhere.
+    const first = this.net ? POWERUP_KINDS[netId % POWERUP_KINDS.length]! : this.drops % 2 === 0 ? 'rocket' : this.gunType;
+    this.drops++;
     const p: Powerup = {
+      netId,
       kindIndex: -1,
       model,
       x,
@@ -1590,19 +1729,146 @@ export class ShooterScene implements GameScene {
 
   // --- Co-op ---------------------------------------------------------------------------
 
+  /**
+   * Seconds the world (spawns, enemies, orbs) advances this frame. In a co-op wave it follows the
+   * server clock from the wave's start, so every client sees the same enemies in the same place;
+   * after a pause or a late join it fast-forwards.
+   */
+  private worldDt(dt: number): number {
+    const net = this.net;
+    if (!net || this.state !== 'playing' || this.phase !== 'shmup') return dt;
+    const target = (this.coop.serverNow() - net.at) / 1000;
+    if (target - this.netClock > NET_CATCH_UP) this.catchUp(target - this.netClock - dt);
+    // Real elapsed time, not the engine's capped frame dt, so slow devices don't fall behind.
+    const step = Math.max(0, target - this.netClock);
+    this.netClock += step;
+    return step;
+  }
+
+  private catchUp(seconds: number): void {
+    this.catchingUp = true;
+    for (let left = seconds; left > NET_STEP && this.phase === 'shmup'; left -= NET_STEP) {
+      this.netClock += NET_STEP;
+      this.time += NET_STEP;
+      this.updateEnemies(NET_STEP);
+      this.spawner.update(NET_STEP, this.playfield.halfWidth, this.spawnEnemy);
+      this.updatePowerups(NET_STEP);
+    }
+    this.catchingUp = false;
+    this.enemyBullets.clear();
+  }
+
+  /** Divers pick their target by id, so in co-op they go for the same pilot on every screen. */
+  private aimFor(enemy: Enemy): { x: number; y: number } {
+    const aim = this.aimPoint;
+    aim.x = this.player.x;
+    aim.y = this.player.y;
+    if (!this.net) return aim;
+    const pilots: { id: number; x: number; y: number }[] = [];
+    if (!this.player.destroyed) pilots.push({ id: this.coop.id, x: this.player.x, y: this.player.y });
+    for (const p of this.remotePlayers) {
+      if (p.flags & COOP_ALIVE && !(p.flags & COOP_COCKPIT) && p.wave === this.net.w) {
+        pilots.push({ id: p.id, x: p.x * this.playfield.halfWidth, y: p.y * this.playfield.arenaTop });
+      }
+    }
+    if (pilots.length === 0) return aim;
+    pilots.sort((a, b) => a.id - b.id);
+    const pick = pilots[enemy.netId % pilots.length]!;
+    aim.x = pick.x;
+    aim.y = pick.y;
+    return aim;
+  }
+
+  private onCoopEvent(e: CoopGameEvent): void {
+    if (this.state !== 'playing') return;
+    if (e.t === 'wave') {
+      if (this.phase === 'sync' && e.w >= this.netWanted) this.beginWave(e);
+      return;
+    }
+    if (e.t === 'out') {
+      this.squadmateOut(e.id, e.quit === true);
+      return;
+    }
+    const net = this.net;
+    if (!net || e.w !== net.w) return;
+    switch (e.t) {
+      case 'kill': {
+        this.netKills.add(e.id);
+        const index = this.enemies.findIndex((en) => en.netId === e.id);
+        if (index >= 0) this.killEnemy(index, 'remote');
+        break;
+      }
+      case 'dmg':
+        for (const [id, damage] of e.h) {
+          const index = this.enemies.findIndex((en) => en.netId === id);
+          const enemy = this.enemies[index];
+          if (enemy?.active && typeof damage === 'number' && enemy.hit(damage)) this.killEnemy(index, 'remote');
+        }
+        break;
+      case 'pick': {
+        this.netPicks.add(e.id);
+        const index = this.powerups.findIndex((p) => p.netId === e.id);
+        const p = this.powerups[index];
+        if (!p) break;
+        this.effects.explode(p.x, p.y, [POWERUP_COLORS[POWERUP_KINDS[p.kindIndex]!], 0xffffff], 10, 5, 0.35);
+        this.removePowerupObject(p);
+        this.powerups.splice(index, 1);
+        break;
+      }
+    }
+  }
+
+  private squadmateOut(id: number, quit: boolean): void {
+    const at = this.remoteShips.positionOf(id);
+    if (!quit && at && this.director.blend < 0.3) {
+      this.effects.explode(at.x, at.y, [0xffffff, 0xffb443, 0xff5a36], 60, 12, 1);
+      this.effects.ring(at.x, at.y, 0.2, 0xffb443, 6, 0.6);
+      this.audio.sfx.explosion('big');
+    }
+    if (this.phase !== 'cockpit' && this.phase !== 'hudBoot') {
+      this.flashMessage(quit ? 'WINGMATE LEFT' : 'WINGMATE DOWN', 'Fight on!', 1.6);
+    }
+  }
+
+  /** Tells the server we're out of the squad's run (game over, quit, solo testing). */
+  private leaveSquad(): void {
+    if (this.net || this.phase === 'sync' || this.state === 'playing') this.coop.send({ t: 'out' });
+    this.net = null;
+    this.netDamage.clear();
+  }
+
+  private goSolo(): void {
+    this.leaveSquad();
+    this.netSolo = true;
+  }
+
+  /** Reports damage to the squad in batches; kills are reported as they happen. */
+  private flushNetDamage(realDt: number): void {
+    this.netDamageTimer -= realDt;
+    if (this.netDamageTimer > 0) return;
+    this.netDamageTimer = NET_DAMAGE_INTERVAL;
+    if (!this.net || this.netDamage.size === 0) return;
+    const h: [number, number][] = [];
+    for (const [id, damage] of this.netDamage) h.push([id, Math.round(damage * 100) / 100]);
+    this.netDamage.clear();
+    this.coop.send({ t: 'dmg', w: this.net.w, h });
+  }
+
   /** Shares our ship with the server and draws everybody else's. */
   private updateCoop(realDt: number): void {
     const pf = this.playfield;
     if (this.coop.status === 'online') {
       const playing = this.state === 'playing';
       const firing = playing && !this.frozen && (this.phase === 'shmup' || this.phase === 'bossApproach' || this.phase === 'boss');
+      this.flushNetDamage(realDt);
       this.coop.sendState({
         x: this.player.x / pf.halfWidth,
-        y: (this.player.y - pf.bottom) / (pf.top - pf.bottom),
+        y: this.player.y / pf.arenaTop,
         flags:
           (playing && !this.player.destroyed ? COOP_ALIVE : 0) |
           (firing ? COOP_FIRING : 0) |
-          (this.director.blend > 0.5 ? COOP_COCKPIT : 0),
+          (this.director.blend > 0.5 ? COOP_COCKPIT : 0) |
+          (playing && this.invulnerable > 0 ? COOP_HURT : 0),
         gun: GUN_TYPES.indexOf(this.gunType),
         gunLevel: this.gunLevel,
         rocketLevel: this.rocketLevel,
@@ -1610,6 +1876,7 @@ export class ShooterScene implements GameScene {
       });
     }
     const players = this.coop.status === 'online' ? this.coop.remotes() : [];
+    this.remotePlayers = players;
     this.remoteShips.update(realDt, players, pf, this.director.blend < 0.3 && this.director.victory < 0);
   }
 

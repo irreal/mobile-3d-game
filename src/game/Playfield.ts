@@ -15,6 +15,17 @@ export class Playfield {
   cameraDistance = 25;
   widthPx = 1;
   heightPx = 1;
+  /**
+   * Co-op: every screen plays the same arena, the narrowest width any screen shows, with a
+   * fixed top edge for spawns and enemy moves.
+   */
+  shared = false;
+
+  setShared(shared: boolean): void {
+    if (shared === this.shared) return;
+    this.shared = shared;
+    this.fit(this.widthPx, this.heightPx);
+  }
 
   /** Recomputes bounds for a new screen size. Camera pose and FOV are left to `CameraDirector`. */
   fit(widthPx: number, heightPx: number): void {
@@ -30,13 +41,18 @@ export class Playfield {
 
     this.visibleHalfWidth = halfW;
     this.visibleHalfHeight = halfH;
-    this.halfWidth = Math.min(halfW, PLAYFIELD.maxWidth / 2);
+    this.halfWidth = this.shared ? PLAYFIELD.minWidth / 2 : Math.min(halfW, PLAYFIELD.maxWidth / 2);
     this.worldPerPixel = (halfH * 2) / heightPx;
     this.cameraDistance = halfH / Math.tan(MathUtils.degToRad(PLAYFIELD.fov / 2));
   }
 
   get top(): number {
     return this.visibleHalfHeight;
+  }
+
+  /** Top edge enemies spawn and move by: the visible top, or the shared one in co-op. */
+  get arenaTop(): number {
+    return this.shared ? PLAYFIELD.height / 2 : this.visibleHalfHeight;
   }
 
   get bottom(): number {
