@@ -1,6 +1,7 @@
 import { CapsuleGeometry, CylinderGeometry, Group, Mesh, MeshStandardMaterial, SphereGeometry } from 'three';
 import type { Object3D, ShaderMaterial, Vector3 } from 'three';
-import { LASER_LEVELS, ROCKET_LEVELS } from './constants.ts';
+import { GUN_TYPES, GUNS, ROCKET_LEVELS } from './constants.ts';
+import type { GunType } from './constants.ts';
 import { createGlowMaterial, glowGeometry } from './glow.ts';
 
 const geo = {
@@ -10,7 +11,11 @@ const geo = {
   podTip: new SphereGeometry(0.05, 8, 6),
 };
 const gunMetal = new MeshStandardMaterial({ color: 0x9aa4bd, metalness: 0.7, roughness: 0.3 });
-const laserTip = new MeshStandardMaterial({ color: 0x103040, emissive: 0x6ff3ff, emissiveIntensity: 1.2 });
+const gunTips = Object.fromEntries(
+  GUN_TYPES.map((t) => [t, new MeshStandardMaterial({ color: 0x101820, emissive: GUNS[t].color, emissiveIntensity: 1.2 })]),
+) as Record<GunType, MeshStandardMaterial>;
+/** Lance barrels are long and thin, scatter barrels short and flared. */
+const BARREL_SHAPE: Record<GunType, [number, number]> = { pulse: [1, 1], lance: [0.75, 1.35], scatter: [1.35, 0.7] };
 const podBody = new MeshStandardMaterial({ color: 0xd8dce8, metalness: 0.4, roughness: 0.35 });
 const podTip = new MeshStandardMaterial({ color: 0x402010, emissive: 0xffa040, emissiveIntensity: 1 });
 const homingTip = new MeshStandardMaterial({ color: 0x400810, emissive: 0xff3050, emissiveIntensity: 1.3 });
@@ -26,8 +31,8 @@ interface Part {
 }
 
 /**
- * Guns and rocket pods mounted on the player ship, matching the current weapon levels: one
- * laser barrel per shot (at its x offset and angle), one pod per rocket launcher. New parts
+ * Guns and rocket pods mounted on the player ship, matching the current weapons: the main
+ * gun's barrels (at their x offset and angle), one pod per rocket launcher. New parts
  * can grow in with a little overshoot, for the upgrade close-up.
  */
 export class ShipWeapons {
@@ -35,10 +40,11 @@ export class ShipWeapons {
   private readonly parts = new Map<string, Part>();
 
   /** Updates the mounted parts; returns the local positions of newly added ones. */
-  set(laser: number, rocket: number, animate: boolean): Vector3[] {
+  set(gun: GunType, level: number, rocket: number, animate: boolean): Vector3[] {
     const wanted = new Map<string, () => Object3D>();
-    for (const [dx, deg] of LASER_LEVELS[laser]?.shots ?? []) {
-      wanted.set(`l${dx}:${deg}`, () => this.barrel(dx, deg));
+    const g = GUNS[gun].levels[level];
+    for (const [dx, deg] of g?.mounts ?? g?.shots ?? []) {
+      wanted.set(`${gun}${dx}:${deg}`, () => this.barrel(gun, dx, deg));
     }
     const r = ROCKET_LEVELS[rocket];
     if (r) {
@@ -93,11 +99,14 @@ export class ShipWeapons {
     part.glow = null;
   }
 
-  private barrel(dx: number, deg: number): Object3D {
+  private barrel(gun: GunType, dx: number, deg: number): Object3D {
     const g = new Group();
+    const [width, length] = BARREL_SHAPE[gun];
     const barrel = new Mesh(geo.barrel, gunMetal);
-    const tip = new Mesh(geo.muzzle, laserTip);
-    tip.position.y = 0.22;
+    barrel.scale.set(width, length, width);
+    const tip = new Mesh(geo.muzzle, gunTips[gun]);
+    tip.position.y = 0.22 * length;
+    tip.scale.setScalar(width);
     g.add(barrel, tip);
     g.position.set(dx * 0.8, 0.42 - Math.abs(dx) * 0.5, 0.08);
     g.rotation.z = (deg * Math.PI) / 180;

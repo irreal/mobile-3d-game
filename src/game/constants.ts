@@ -23,21 +23,110 @@ export const PLAYER = {
   invulnerableTime: 2,
 };
 
+export type GunType = 'pulse' | 'lance' | 'scatter';
+
+/** Shots per volley as [x offset, angle in degrees]. */
+type Shots = readonly (readonly [number, number])[];
+
 /**
- * Laser levels (index = level, 1-based): seconds between volleys and the shots per volley as
- * [x offset, angle in degrees]. Lasers do 1 damage per bolt.
+ * One level of a main gun: seconds between volleys, the shots, damage per bolt, how many enemies
+ * a bolt can pass through (1 = stops at the first), bolt speed and lifetime (range), and the
+ * barrels shown on the hull (defaults to one per shot).
  */
-export const LASER_LEVELS: readonly { interval: number; shots: readonly (readonly [number, number])[] }[] = [
-  { interval: 1, shots: [] },
-  { interval: 0.12, shots: [[-0.3, 0], [0.3, 0]] },
-  { interval: 0.12, shots: [[0, 0], [-0.4, 0], [0.4, 0]] },
-  { interval: 0.11, shots: [[0, 0], [-0.4, 0], [0.4, 0], [-0.65, 9], [0.65, -9]] },
-  { interval: 0.1, shots: [[-0.2, 0], [0.2, 0], [-0.5, 0], [0.5, 0], [-0.7, 8], [0.7, -8]] },
-  {
-    interval: 0.09,
-    shots: [[0, 0], [-0.3, 0], [0.3, 0], [-0.6, 0], [0.6, 0], [-0.75, 10], [0.75, -10], [-0.85, 20], [0.85, -20]],
+export interface GunLevel {
+  interval: number;
+  shots: Shots;
+  damage: number;
+  pierce: number;
+  speed: number;
+  life: number;
+  mounts?: Shots;
+}
+
+export interface Gun {
+  name: string;
+  /** Short HUD label. */
+  tag: string;
+  note: string;
+  color: number;
+  /** Index = level, 1-based. */
+  levels: readonly GunLevel[];
+}
+
+const pulse = (interval: number, shots: Shots): GunLevel => ({ interval, shots, damage: 1, pierce: 1, speed: 30, life: Infinity });
+const lance = (interval: number, shots: Shots, damage: number, pierce: number): GunLevel => ({
+  interval,
+  shots,
+  damage,
+  pierce,
+  speed: 40,
+  life: Infinity,
+});
+/** A fan of `count` short-range pellets spanning ±`spread` degrees. */
+const scatter = (interval: number, count: number, spread: number, mounts: Shots): GunLevel => ({
+  interval,
+  shots: Array.from({ length: count }, (_, i) => {
+    const deg = count === 1 ? 0 : -spread + (2 * spread * i) / (count - 1);
+    return [-deg * 0.012, deg] as const;
+  }),
+  damage: 1,
+  pierce: 1,
+  speed: 24,
+  life: 0.5,
+  mounts,
+});
+
+/**
+ * Main guns. Collecting an orb in the colour of the current gun upgrades it; another gun's
+ * colour switches to that gun at the same level.
+ */
+export const GUNS: Record<GunType, Gun> = {
+  pulse: {
+    name: 'PULSE LASER',
+    tag: 'PLS',
+    note: 'Balanced spread',
+    color: 0x6ff3ff,
+    levels: [
+      pulse(1, []),
+      pulse(0.12, [[-0.3, 0], [0.3, 0]]),
+      pulse(0.12, [[0, 0], [-0.4, 0], [0.4, 0]]),
+      pulse(0.11, [[0, 0], [-0.4, 0], [0.4, 0], [-0.65, 9], [0.65, -9]]),
+      pulse(0.1, [[-0.2, 0], [0.2, 0], [-0.5, 0], [0.5, 0], [-0.7, 8], [0.7, -8]]),
+      pulse(0.09, [[0, 0], [-0.3, 0], [0.3, 0], [-0.6, 0], [0.6, 0], [-0.75, 10], [0.75, -10], [-0.85, 20], [0.85, -20]]),
+    ],
   },
-];
+  lance: {
+    name: 'LANCE',
+    tag: 'LNC',
+    note: 'Piercing beam',
+    color: 0xff6af0,
+    levels: [
+      lance(1, [], 0, 0),
+      lance(0.13, [[-0.12, 0], [0.12, 0]], 1, 2),
+      lance(0.12, [[-0.12, 0], [0.12, 0]], 1.3, 3),
+      lance(0.12, [[0, 0], [-0.25, 0], [0.25, 0]], 1.3, 3),
+      lance(0.11, [[0, 0], [-0.25, 0], [0.25, 0]], 1.5, 4),
+      lance(0.1, [[-0.12, 0], [0.12, 0], [-0.35, 0], [0.35, 0]], 1.6, 5),
+    ],
+  },
+  scatter: {
+    name: 'SCATTER',
+    tag: 'SCT',
+    note: 'Wide, short range',
+    color: 0x8dff6a,
+    levels: [
+      scatter(1, 0, 0, []),
+      scatter(0.16, 3, 12, [[0, 0]]),
+      scatter(0.15, 5, 20, [[-0.25, 0], [0.25, 0]]),
+      scatter(0.14, 7, 30, [[0, 0], [-0.4, 14], [0.4, -14]]),
+      scatter(0.13, 9, 38, [[-0.2, 0], [0.2, 0], [-0.55, 16], [0.55, -16]]),
+      scatter(0.12, 11, 46, [[0, 0], [-0.3, 0], [0.3, 0], [-0.65, 20], [0.65, -20]]),
+    ],
+  },
+};
+
+export const GUN_TYPES = Object.keys(GUNS) as GunType[];
+export const MAX_GUN_LEVEL = 5;
 
 /**
  * Rocket levels (0 = no rockets): seconds between salvos, launch x offsets, whether rockets
@@ -71,9 +160,15 @@ export const ENEMY_BULLET = {
 /** Seconds of play until difficulty ramps to its maximum. */
 export const DIFFICULTY_RAMP_TIME = 150;
 
-/** Power-ups only come from heavies (tanks), alternating rocket/laser, skipping maxed weapons. */
+/**
+ * Power orbs drop from heavies (tanks). They bounce around the arena while slowly sinking, and
+ * cycle through each gun's colour and rockets; what you get depends on the colour when caught.
+ */
 export const POWERUP = {
-  fallSpeed: 2.5,
+  fallSpeed: 1.6,
+  driftSpeed: 3.2,
+  /** Seconds per colour. */
+  cycle: 1.5,
   maxedScore: 500,
 };
 

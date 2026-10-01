@@ -15,6 +15,10 @@ export interface PoolItem {
   scale: number;
   rotation: number;
   radius: number;
+  /** Projectiles: damage per hit, enemies it can still hit, and the last one it hit. */
+  damage: number;
+  pierce: number;
+  lastHit: object | null;
 }
 
 const dummy = new Object3D();
@@ -48,6 +52,9 @@ export class InstancedPool {
       scale: 1,
       rotation: 0,
       radius: 0,
+      damage: 1,
+      pierce: 1,
+      lastHit: null,
     }));
   }
 
@@ -67,6 +74,9 @@ export class InstancedPool {
     item.age = 0;
     item.scale = 1;
     item.rotation = 0;
+    item.damage = 1;
+    item.pierce = 1;
+    item.lastHit = null;
     if (color !== undefined) this.mesh.setColorAt(index, tmpColor.set(color));
     return item;
   }

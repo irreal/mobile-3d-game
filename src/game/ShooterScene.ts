@@ -4,9 +4,11 @@ import {
   DirectionalLight,
   HemisphereLight,
   MathUtils,
+  Mesh,
   MeshBasicMaterial,
   PointLight,
   Scene,
+  SphereGeometry,
   Vector3,
 } from 'three';
 import type { PerspectiveCamera } from 'three';
@@ -31,13 +33,16 @@ import {
   DIFFICULTY_RAMP_TIME,
   ENEMY_BULLET,
   GAME_TITLE,
+  GUN_TYPES,
+  GUNS,
   HISCORE_STORAGE_KEY,
-  LASER_LEVELS,
+  MAX_GUN_LEVEL,
   PLAYER,
   POWERUP,
   ROCKET,
   ROCKET_LEVELS,
 } from './constants.ts';
+import type { GunType } from './constants.ts';
 import { Effects } from './Effects.ts';
 import { createGlowMaterial, glowGeometry } from './glow.ts';
 import { Enemy, EXPLOSION_COLORS } from './Enemy.ts';
@@ -45,8 +50,8 @@ import { Environment, environmentForWave, upcomingPlanet } from './Environment.t
 import type { EnvironmentId } from './Environment.ts';
 import type { EnemyContext, EnemyKind } from './Enemy.ts';
 import { InstancedPool } from './InstancedPool.ts';
-import { createPowerup, disposeModel, POWERUP_COLORS, sharedGeometries } from './models.ts';
-import type { Model, PowerupKind } from './models.ts';
+import { createPowerup, disposeModel, POWERUP_COLORS, POWERUP_KINDS, sharedGeometries } from './models.ts';
+import type { PowerupKind, PowerupModel } from './models.ts';
 import { Playfield } from './Playfield.ts';
 import { PlayerShip } from './PlayerShip.ts';
 import { Nebula } from './Nebula.ts';
@@ -93,16 +98,22 @@ const HIDE_SHIP_FROM_BLEND = 0.97;
 const SECTION_END_PAUSE = 1.6;
 
 interface Powerup {
-  kind: PowerupKind;
-  model: Model;
+  /** Index into POWERUP_KINDS of the colour it is right now. */
+  kindIndex: number;
+  model: PowerupModel;
   x: number;
   y: number;
+  vx: number;
+  vy: number;
+  /** Seconds until the next colour change. */
+  cycleTimer: number;
 }
 
 const PLAYER_COLORS = [0xdfe7ff, 0x3b7bff, 0x6ff3ff, 0xffa040];
-const PLAYER_BULLET_COLOR = new Color(0x7ff6ff).multiplyScalar(1.05);
+/** Bolts are tinted per gun; this lifts them a little above their HUD colour. */
+const PLAYER_BULLET_BOOST = new Color(0xffffff).multiplyScalar(1.05);
+const BOLT_SCALE: Record<GunType, number> = { pulse: 1, lance: 1.35, scatter: 0.8 };
 
-const MAX_LASER = LASER_LEVELS.length - 1;
 const MAX_ROCKET = ROCKET_LEVELS.length - 1;
 const ROCKET_COLOR = new Color(0xffd08a).multiplyScalar(1.2);
 
@@ -134,8 +145,9 @@ export class ShooterScene implements GameScene {
   private readonly player = new PlayerShip();
   private readonly playerBullets = new InstancedPool(
     sharedGeometries.playerBullet,
-    new MeshBasicMaterial({ color: PLAYER_BULLET_COLOR, transparent: true, blending: AdditiveBlending, depthWrite: false }),
-    160,
+    new MeshBasicMaterial({ color: PLAYER_BULLET_BOOST, transparent: true, blending: AdditiveBlending, depthWrite: false }),
+    240,
+    true,
   );
   private readonly enemyBullets = new InstancedPool(
     glowGeometry,
@@ -167,11 +179,18 @@ export class ShooterScene implements GameScene {
   private score = 0;
   private hiScore = loadHiScore();
   private lives: number = PLAYER.lives;
-  private laserLevel = 1;
+  private gunType: GunType = 'pulse';
+  private gunLevel = 1;
   private rocketLevel = 0;
+  /** Absorbs the next hit (earned by catching an orb for a maxed weapon). */
+  private barrier = false;
+  private readonly barrierMesh = new Mesh(
+    new SphereGeometry(1.15, 24, 16),
+    new MeshBasicMaterial({ color: 0x8fd0ff, transparent: true, opacity: 0, blending: AdditiveBlending, depthWrite: false }),
+  );
   private fireTimer = 0;
   private rocketTimer = 0;
-  /** Power-ups dropped this game; drives the rocket/laser alternation. */
+  /** Power orbs dropped this game; alternates the colour new orbs start on. */
   private drops = 0;
   private invulnerable = 0;
   private shake = 0;
@@ -244,12 +263,17 @@ export class ShooterScene implements GameScene {
         jumpToBase: (planet) => this.jumpToBase(planet),
         jumpToVictory: () => this.jumpToVictory(),
         weaponLevel: (weapon) =>
-          weapon === 'laser'
-            ? { level: this.laserLevel, max: MAX_LASER }
+          weapon === 'gun'
+            ? { level: this.gunLevel, max: MAX_GUN_LEVEL }
             : { level: this.rocketLevel, max: MAX_ROCKET },
         setWeaponLevel: (weapon, level) => {
-          if (weapon === 'laser') return (this.laserLevel = MathUtils.clamp(level, 1, MAX_LASER));
+          if (weapon === 'gun') return (this.gunLevel = MathUtils.clamp(level, 1, MAX_GUN_LEVEL));
           return (this.rocketLevel = MathUtils.clamp(level, 0, MAX_ROCKET));
+        },
+        gunName: () => GUNS[this.gunType].name,
+        cycleGun: () => {
+          this.gunType = GUN_TYPES[(GUN_TYPES.indexOf(this.gunType) + 1) % GUN_TYPES.length]!;
+          return GUNS[this.gunType].name;
         },
         toggleSound: () => audio.engine.toggleMuted(),
         toggleEffects: () => {
@@ -282,6 +306,8 @@ export class ShooterScene implements GameScene {
 
     this.scene.add(this.nebula.mesh);
     for (const layer of this.starfield.layers) this.scene.add(layer.points);
+    this.barrierMesh.renderOrder = 4;
+    this.player.object.add(this.barrierMesh);
     this.scene.add(this.player.object, this.playerBullets.mesh, this.enemyBullets.mesh, this.rockets.mesh);
     this.scene.add(this.warp.object, this.interior.object, this.environment.object);
     cockpitOverlay.setInterior(this.interior.available);
@@ -367,6 +393,7 @@ export class ShooterScene implements GameScene {
     this.invulnerable = Math.max(0, this.invulnerable - dt);
     this.player.sync(dt, this.upgradeTime >= 0 ? 0 : this.invulnerable);
     if (this.state === 'victory') this.animateVictoryShip();
+    this.updateBarrier(realDt);
     this.syncWeapons();
     this.player.weapons.update(realDt);
     this.updateEnginePlume(dt);
@@ -613,10 +640,10 @@ export class ShooterScene implements GameScene {
   /** Mounts the hull guns for the current levels (animated for the close-up). */
   private syncWeapons(animate = false): void {
     if (this.upgradeTime >= 0 && !this.upgradeInstalled) return;
-    const key = `${this.laserLevel}/${this.rocketLevel}`;
+    const key = `${this.gunType}${this.gunLevel}/${this.rocketLevel}`;
     if (key === this.shownWeapons) return;
     this.shownWeapons = key;
-    this.player.weapons.set(this.laserLevel, this.rocketLevel, animate);
+    this.player.weapons.set(this.gunType, this.gunLevel, this.rocketLevel, animate);
   }
 
   private cancelUpgradeCinematic(): void {
@@ -993,8 +1020,10 @@ export class ShooterScene implements GameScene {
     this.time = 0;
     this.score = 0;
     this.lives = PLAYER.lives;
-    this.laserLevel = 1;
+    this.gunType = 'pulse';
+    this.gunLevel = 1;
     this.rocketLevel = 0;
+    this.barrier = false;
     this.fireTimer = 0;
     this.rocketTimer = 0;
     this.drops = 0;
@@ -1082,8 +1111,8 @@ export class ShooterScene implements GameScene {
     // Auto-fire: mobile players need both thumbs free for steering.
     this.fireTimer -= dt;
     while (this.fireTimer <= 0) {
-      this.fireTimer += LASER_LEVELS[this.laserLevel]!.interval;
-      this.fireLasers();
+      this.fireTimer += GUNS[this.gunType].levels[this.gunLevel]!.interval;
+      this.fireGun();
     }
     if (this.rocketLevel > 0) {
       this.rocketTimer -= dt;
@@ -1102,26 +1131,53 @@ export class ShooterScene implements GameScene {
     }
   }
 
-  private fireLasers(): void {
+  private fireGun(): void {
     this.audio.sfx.shot();
     const y = this.player.y + 0.9;
-    for (const [dx, deg] of LASER_LEVELS[this.laserLevel]!.shots) {
+    const gun = GUNS[this.gunType];
+    const level = gun.levels[this.gunLevel]!;
+    for (const [dx, deg] of level.shots) {
       const a = MathUtils.degToRad(90 + deg);
       const b = this.playerBullets.spawn(
         this.player.x + dx,
         y,
-        Math.cos(a) * PLAYER.bulletSpeed,
-        Math.sin(a) * PLAYER.bulletSpeed,
+        Math.cos(a) * level.speed,
+        Math.sin(a) * level.speed,
         0.3,
+        level.life,
+        gun.color,
       );
-      if (b) b.rotation = MathUtils.degToRad(deg);
+      if (!b) continue;
+      b.rotation = MathUtils.degToRad(deg);
+      b.scale = BOLT_SCALE[this.gunType];
+      b.damage = level.damage;
+      b.pierce = level.pierce;
     }
   }
 
   private damagePlayer(): void {
     if (this.invulnerable > 0) return;
     const { x, y } = this.player;
+    if (this.barrier) {
+      this.barrier = false;
+      this.shake = 0.3;
+      navigator.vibrate?.(40);
+      this.audio.sfx.hit();
+      this.effects.ring(x, y, 0.2, 0x8fd0ff, 4, 0.45);
+      this.effects.explode(x, y, [0x8fd0ff, 0xffffff], 24, 8, 0.5);
+      if (this.director.blend > 0) this.cockpitOverlay.hitFlash();
+      this.popEnemyBullets();
+      this.cockpit.popOrbs();
+      this.invulnerable = PLAYER.invulnerableTime;
+      this.flashMessage('BARRIER DOWN', '', 0.8);
+      return;
+    }
     this.lives--;
+    if (this.lives > 0 && this.gunLevel > 1) {
+      // Losing power on a hit keeps orbs worth chasing all game.
+      this.gunLevel--;
+      this.flashMessage('POWER DOWN', `${GUNS[this.gunType].name} ${this.gunLevel}/${MAX_GUN_LEVEL}`, 1);
+    }
     this.shake = 0.6;
     navigator.vibrate?.(this.lives > 0 ? 80 : 250);
     this.audio.sfx.playerHit();
@@ -1279,7 +1335,27 @@ export class ShooterScene implements GameScene {
   private updatePowerups(dt: number): void {
     for (let i = this.powerups.length - 1; i >= 0; i--) {
       const p = this.powerups[i]!;
-      p.y -= POWERUP.fallSpeed * dt;
+      // Bounces off the sides and top while it sinks toward the bottom.
+      p.vy += (-POWERUP.fallSpeed - p.vy) * Math.min(1, dt * 0.8);
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      const edge = this.playfield.halfWidth - 0.7;
+      if (Math.abs(p.x) > edge) {
+        p.x = Math.sign(p.x) * edge;
+        p.vx = -p.vx;
+      }
+      if (p.y > this.playfield.top - 1.2) {
+        p.y = this.playfield.top - 1.2;
+        p.vy = -Math.abs(p.vy);
+      }
+      p.cycleTimer -= dt;
+      if (p.cycleTimer <= 0) {
+        p.cycleTimer += POWERUP.cycle;
+        this.setPowerupKind(p, (p.kindIndex + 1) % POWERUP_KINDS.length);
+      }
+      // A quick flicker warns that the colour is about to change.
+      const warn = p.cycleTimer < 0.3 ? 0.85 + 0.15 * Math.cos(p.cycleTimer * 60) : 1;
+      p.model.object.scale.setScalar(warn);
       p.model.object.position.set(p.x, p.y, 0);
       p.model.object.rotation.y += dt * 3;
       p.model.object.rotation.x += dt * 1.3;
@@ -1299,10 +1375,12 @@ export class ShooterScene implements GameScene {
       const b = this.playerBullets.items[i]!;
       for (let j = this.enemies.length - 1; j >= 0; j--) {
         const e = this.enemies[j]!;
-        if (!e.active || !circlesOverlap(b.x, b.y, b.radius, e.x, e.y, e.radius)) continue;
-        this.playerBullets.remove(i);
-        this.effects.explode(b.x, b.y + 0.3, [0x7ff6ff, 0xffffff], 3, 5, 0.25);
-        if (e.hit(1)) this.killEnemy(j);
+        if (!e.active || e === b.lastHit || !circlesOverlap(b.x, b.y, b.radius, e.x, e.y, e.radius)) continue;
+        b.lastHit = e;
+        const spent = --b.pierce <= 0 || e.shielded;
+        this.effects.explode(b.x, b.y + 0.3, [GUNS[this.gunType].color, 0xffffff], 3, 5, 0.25);
+        if (spent) this.playerBullets.remove(i);
+        if (e.hit(b.damage)) this.killEnemy(j);
         else this.audio.sfx.hit();
         break;
       }
@@ -1341,10 +1419,11 @@ export class ShooterScene implements GameScene {
     for (let i = this.powerups.length - 1; i >= 0; i--) {
       const p = this.powerups[i]!;
       if (!circlesOverlap(p.x, p.y, 0.45, px, py, PLAYER.pickupRadius)) continue;
+      const kind = POWERUP_KINDS[p.kindIndex]!;
       this.audio.sfx.powerup();
-      if (this.applyPowerup(p.kind)) this.startUpgradeCinematic();
-      this.effects.explode(p.x, p.y, [POWERUP_COLORS[p.kind], 0xffffff], 16, 6, 0.4);
-      this.effects.ring(p.x, p.y, 0.2, POWERUP_COLORS[p.kind], 3.5, 0.4);
+      if (this.applyPowerup(kind)) this.startUpgradeCinematic();
+      this.effects.explode(p.x, p.y, [POWERUP_COLORS[kind], 0xffffff], 16, 6, 0.4);
+      this.effects.ring(p.x, p.y, 0.2, POWERUP_COLORS[kind], 3.5, 0.4);
       navigator.vibrate?.(20);
       this.removePowerupObject(p);
       this.powerups.splice(i, 1);
@@ -1389,29 +1468,41 @@ export class ShooterScene implements GameScene {
     }
   }
 
-  /** Deterministic drops: alternate rocket/laser upgrades, skipping a weapon that's maxed. */
-  private nextPowerupKind(): PowerupKind {
-    const preferred: PowerupKind = this.drops++ % 2 === 0 ? 'rocket' : 'laser';
-    if (preferred === 'rocket' && this.rocketLevel >= MAX_ROCKET) return 'laser';
-    if (preferred === 'laser' && this.laserLevel >= MAX_LASER) return 'rocket';
-    return preferred;
-  }
-
-  /** Returns true if a weapon was upgraded (not just points for a maxed one). */
+  /**
+   * Catching the current gun's colour upgrades it; another gun's colour switches to that gun at
+   * the same level (a side-grade, never both). Rockets upgrade rockets. A maxed weapon's colour
+   * raises a barrier instead (or scores, if one is already up). Returns true if the hull
+   * guns changed.
+   */
   private applyPowerup(kind: PowerupKind): boolean {
-    if (kind === 'laser' && this.laserLevel < MAX_LASER) {
-      this.laserLevel++;
-      this.flashMessage('LASER UP', `Level ${this.laserLevel}/${MAX_LASER}`, 1.1);
-      return true;
-    } else if (kind === 'rocket' && this.rocketLevel < MAX_ROCKET) {
+    if (kind === 'rocket') {
+      if (this.rocketLevel >= MAX_ROCKET) return this.overflowPowerup();
       this.rocketLevel++;
       const extra = ROCKET_LEVELS[this.rocketLevel]!;
       const note = this.rocketLevel === 1 ? 'Rockets online' : extra.splash > 0 ? 'Splash damage' : extra.homing ? 'Homing' : '';
       this.flashMessage('ROCKETS UP', `Level ${this.rocketLevel}/${MAX_ROCKET}${note ? ` · ${note}` : ''}`, 1.1);
       return true;
     }
-    this.score += POWERUP.maxedScore;
-    this.flashMessage('MAXED', `+${POWERUP.maxedScore}`, 0.9);
+    const gun = GUNS[kind];
+    if (kind !== this.gunType) {
+      this.gunType = kind;
+      this.flashMessage(gun.name, `${gun.note} · Level ${this.gunLevel}/${MAX_GUN_LEVEL}`, 1.3);
+      return true;
+    }
+    if (this.gunLevel >= MAX_GUN_LEVEL) return this.overflowPowerup();
+    this.gunLevel++;
+    this.flashMessage(`${gun.name} UP`, `Level ${this.gunLevel}/${MAX_GUN_LEVEL}`, 1.1);
+    return true;
+  }
+
+  private overflowPowerup(): false {
+    if (!this.barrier) {
+      this.barrier = true;
+      this.flashMessage('BARRIER', 'Absorbs the next hit', 1.1);
+    } else {
+      this.score += POWERUP.maxedScore;
+      this.flashMessage('MAXED', `+${POWERUP.maxedScore}`, 0.9);
+    }
     return false;
   }
 
@@ -1427,12 +1518,38 @@ export class ShooterScene implements GameScene {
     e.dispose();
   }
 
+  /** Orbs start on the current gun's colour or rockets, alternately, then cycle. */
   private spawnPowerup(x: number, y: number): void {
-    const kind = this.nextPowerupKind();
-    const model = createPowerup(kind);
+    const model = createPowerup();
     model.object.position.set(x, y, 0);
     this.scene.add(model.object);
-    this.powerups.push({ kind, model, x, y });
+    if (this.drops === 0) this.flashMessage('POWER ORB', 'Its colour cycles · match your gun to upgrade', 2);
+    const first = this.drops++ % 2 === 0 ? 'rocket' : this.gunType;
+    const p: Powerup = {
+      kindIndex: -1,
+      model,
+      x,
+      y,
+      vx: (x > 0 ? -1 : 1) * POWERUP.driftSpeed,
+      vy: 2.5,
+      cycleTimer: POWERUP.cycle,
+    };
+    this.setPowerupKind(p, POWERUP_KINDS.indexOf(first));
+    this.powerups.push(p);
+  }
+
+  private setPowerupKind(p: Powerup, index: number): void {
+    if (p.kindIndex >= 0) p.model.looks[POWERUP_KINDS[p.kindIndex]!].visible = false;
+    p.kindIndex = index;
+    p.model.looks[POWERUP_KINDS[index]!].visible = true;
+  }
+
+  /** Pulsing bubble around the ship while the barrier is up. */
+  private updateBarrier(realDt: number): void {
+    const material = this.barrierMesh.material;
+    const target = this.barrier ? 0.16 + 0.06 * Math.sin(this.time * 5) : 0;
+    material.opacity = MathUtils.damp(material.opacity, target, 10, realDt);
+    this.barrierMesh.visible = material.opacity > 0.005;
   }
 
   private removePowerupObject(p: Powerup): void {
@@ -1478,7 +1595,7 @@ export class ShooterScene implements GameScene {
     this.hud.setScore(this.score);
     this.hud.setHiScore(Math.max(this.hiScore, this.score));
     this.hud.setLives(this.state === 'title' ? PLAYER.lives : this.lives);
-    this.hud.setWeapons(this.laserLevel, MAX_LASER, this.rocketLevel, MAX_ROCKET);
+    this.hud.setWeapons(GUNS[this.gunType], this.gunLevel, MAX_GUN_LEVEL, this.rocketLevel, MAX_ROCKET, this.barrier);
   }
 }
 

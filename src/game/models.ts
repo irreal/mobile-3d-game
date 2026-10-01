@@ -15,10 +15,11 @@ import {
   SRGBColorSpace,
   TextureLoader,
 } from 'three';
-import type { BufferGeometry, Material, MeshStandardMaterialParameters, Texture ,
-  Box3} from 'three';
+import type { Box3, BufferGeometry, Material, MeshStandardMaterialParameters, Object3D, Texture } from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { createGlowMaterial, glowGeometry } from './glow.ts';
+import { GUN_TYPES, GUNS } from './constants.ts';
+import type { GunType } from './constants.ts';
 
 /**
  * Ship models come from Quaternius' CC0 "Ultimate Spaceships" pack (public/assets/ships),
@@ -307,32 +308,52 @@ function tinted(model: Model, color: number, scale = 1): Model {
   return model;
 }
 
-export type PowerupKind = 'laser' | 'rocket';
+export type PowerupKind = GunType | 'rocket';
+export const POWERUP_KINDS: readonly PowerupKind[] = [...GUN_TYPES, 'rocket'];
 
-export const POWERUP_COLORS: Record<PowerupKind, number> = { laser: 0x6ff3ff, rocket: 0xffa040 };
+export const POWERUP_COLORS = {
+  ...Object.fromEntries(GUN_TYPES.map((t) => [t, GUNS[t].color])),
+  rocket: 0xffa040,
+} as Record<PowerupKind, number>;
 
-const powerupGlows: Record<PowerupKind, Material> = {
-  laser: createGlowMaterial({ size: 2, intensity: 0.8, core: 0.15, color: [0.45, 0.95, 1] }),
-  rocket: createGlowMaterial({ size: 2, intensity: 0.8, core: 0.15, color: [1, 0.6, 0.25] }),
-};
-for (const m of Object.values(powerupGlows)) sharedMaterials.add(m);
+const powerupGlows = {} as Record<PowerupKind, Material>;
+for (const k of POWERUP_KINDS) {
+  const hex = POWERUP_COLORS[k];
+  const color: [number, number, number] = [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255];
+  powerupGlows[k] = createGlowMaterial({ size: 2, intensity: 0.8, core: 0.15, color });
+  sharedMaterials.add(powerupGlows[k]);
+}
 
-/** Laser upgrades are cyan gems; rocket upgrades are orange capsules with a tail fin ring. */
-export function createPowerup(kind: PowerupKind): Model {
+export interface PowerupModel extends Model {
+  /** One look per kind; show the one the orb currently is. */
+  looks: Record<PowerupKind, Object3D>;
+}
+
+/** Power orb: gun colours are gems, rockets an orange capsule with a ring. */
+export function createPowerup(): PowerupModel {
   const object = new Group();
-  const color = POWERUP_COLORS[kind];
-  const body = standard(color, { emissive: color, emissiveIntensity: 0.7, metalness: 0.2 });
-  if (kind === 'laser') {
-    object.add(mesh(geometries.powerup, body));
-  } else {
-    const capsule = mesh(geometries.powerupRocket, body);
-    capsule.rotation.z = 0.5;
-    const ring = mesh(geometries.powerupRing, standard(0xfff1c9, { emissive: 0xffd23d, emissiveIntensity: 0.6 }));
-    ring.rotation.x = Math.PI / 2;
-    object.add(capsule, ring);
+  const flashMaterials: MeshStandardMaterial[] = [];
+  const looks = {} as Record<PowerupKind, Object3D>;
+  for (const kind of POWERUP_KINDS) {
+    const look = new Group();
+    const color = POWERUP_COLORS[kind];
+    const body = standard(color, { emissive: color, emissiveIntensity: 0.7, metalness: 0.2 });
+    flashMaterials.push(body);
+    if (kind !== 'rocket') {
+      look.add(mesh(geometries.powerup, body));
+    } else {
+      const capsule = mesh(geometries.powerupRocket, body);
+      capsule.rotation.z = 0.5;
+      const ring = mesh(geometries.powerupRing, standard(0xfff1c9, { emissive: 0xffd23d, emissiveIntensity: 0.6 }));
+      ring.rotation.x = Math.PI / 2;
+      look.add(capsule, ring);
+    }
+    look.add(new Mesh(glowGeometry, powerupGlows[kind]));
+    look.visible = false;
+    looks[kind] = look;
+    object.add(look);
   }
-  object.add(new Mesh(glowGeometry, powerupGlows[kind]));
-  return { object, flashMaterials: [body] };
+  return { object, flashMaterials, looks };
 }
 
 export function disposeModel(model: Model): void {

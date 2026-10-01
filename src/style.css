@@ -105,6 +105,10 @@ body {
   color: #ffa040;
 }
 
+.hud-weapon.barrier {
+  color: #bfe6ff;
+}
+
 .hud-message {
   position: absolute;
   left: 0;

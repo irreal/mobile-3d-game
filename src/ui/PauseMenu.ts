@@ -19,9 +19,12 @@ export interface PauseMenuActions {
   /** Testing: read / set weapon levels (clamped by the game); `set` returns the new level. */
   weaponLevel: (weapon: Weapon) => { level: number; max: number };
   setWeaponLevel: (weapon: Weapon, level: number) => number;
+  /** Testing: current main gun name, and switching to the next one (returns its name). */
+  gunName: () => string;
+  cycleGun: () => string;
 }
 
-export type Weapon = 'laser' | 'rocket';
+export type Weapon = 'gun' | 'rocket';
 
 const TEST_STRIKES = 5;
 
@@ -74,7 +77,8 @@ export class PauseMenu {
       this.tutorialButton,
       testRow(actions.jumpToCockpit),
       baseTestRow(actions.jumpToBase, actions.jumpToVictory),
-      this.weaponRow('Laser', 'laser', actions),
+      this.gunRow(actions),
+      this.weaponRow('Gun level', 'gun', actions),
       this.weaponRow('Rockets', 'rocket', actions),
       replyDelayRow(),
       updateButton,
@@ -123,6 +127,25 @@ export class PauseMenu {
     minus.classList.add('small');
     plus.classList.add('small');
     row.append(label, minus, plus);
+    this.weaponRows.push(render);
+    render();
+    return row;
+  }
+
+  /** Switches the main gun type (testing). */
+  private gunRow(actions: PauseMenuActions): HTMLDivElement {
+    const row = document.createElement('div');
+    row.className = 'menu-row';
+    const label = document.createElement('span');
+    const render = (): void => {
+      label.textContent = `Gun: ${actions.gunName()}`;
+    };
+    const next = menuButton('Switch', () => {
+      actions.cycleGun();
+      render();
+    });
+    next.classList.add('small');
+    row.append(label, next);
     this.weaponRows.push(render);
     render();
     return row;

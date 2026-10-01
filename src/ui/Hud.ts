@@ -1,6 +1,6 @@
 import { bindUpdateCheck } from './update.ts';
 
-/** DOM overlay: score, high score, lives, laser and rocket levels, center message, and an optional FPS meter. */
+/** DOM overlay: score, high score, lives, gun, rocket and barrier status, center message, and an optional FPS meter. */
 export class Hud {
   private readonly root: HTMLDivElement;
   private readonly score: HTMLDivElement;
@@ -9,6 +9,7 @@ export class Hud {
   private readonly lives: HTMLDivElement;
   private readonly laser: HTMLDivElement;
   private readonly rocket: HTMLDivElement;
+  private readonly barrier: HTMLDivElement;
   private readonly message: HTMLDivElement;
   private readonly messageTitle: HTMLDivElement;
   private readonly messageBody: HTMLDivElement;
@@ -30,7 +31,10 @@ export class Hud {
     this.lives = el('div', 'hud-lives');
     this.laser = el('div', 'hud-weapon laser');
     this.rocket = el('div', 'hud-weapon rocket');
-    right.append(this.lives, this.laser, this.rocket);
+    this.barrier = el('div', 'hud-weapon barrier');
+    this.barrier.textContent = 'BARRIER ◈';
+    this.barrier.hidden = true;
+    right.append(this.lives, this.laser, this.rocket, this.barrier);
     top.append(this.score, center, right);
 
     this.message = el('div', 'hud-message');
@@ -101,12 +105,15 @@ export class Hud {
     this.lives.textContent = '▲'.repeat(Math.max(0, lives));
   }
 
-  setWeapons(laser: number, laserMax: number, rocket: number, rocketMax: number): void {
-    const key = `${laser}/${rocket}`;
+  /** Main gun (short tag, colour, level), rockets, and whether a barrier is up. */
+  setWeapons(gun: { tag: string; color: number }, level: number, max: number, rocket: number, rocketMax: number, barrier: boolean): void {
+    const key = `${gun.tag}${level}/${rocket}/${barrier}`;
     if (key === this.shown.weapons) return;
     this.shown.weapons = key;
-    this.laser.textContent = `LSR ${'■'.repeat(laser)}${'□'.repeat(laserMax - laser)}`;
+    this.laser.textContent = `${gun.tag} ${'■'.repeat(level)}${'□'.repeat(max - level)}`;
+    this.laser.style.color = `#${gun.color.toString(16).padStart(6, '0')}`;
     this.rocket.textContent = `RKT ${'■'.repeat(rocket)}${'□'.repeat(rocketMax - rocket)}`;
+    this.barrier.hidden = !barrier;
   }
 
   showMessage(title: string, body = ''): void {
