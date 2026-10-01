@@ -2,6 +2,7 @@ import { AdditiveBlending, Color, CylinderGeometry, MathUtils, Mesh, MeshBasicMa
 import type { PerspectiveCamera, Scene } from 'three';
 import type { Music } from '../audio/Music.ts';
 import type { Sfx } from '../audio/Sfx.ts';
+import type { Vec2 } from '../input/Input.ts';
 import type { BeamGuide, CockpitOverlay, Grade, LaneNote, NoteMarker, PhraseMode } from '../ui/CockpitOverlay.ts';
 import { COCKPIT } from './constants.ts';
 import type { Effects } from './Effects.ts';
@@ -119,6 +120,29 @@ export interface CockpitFrame {
   active: boolean;
   widthPx: number;
   heightPx: number;
+  /** Steering this frame: drag in CSS pixels (y up), and the keyboard axis. */
+  drag: Vec2;
+  axis: Vec2;
+}
+
+/** A first-person mini-game played between waves. */
+export interface CockpitGame {
+  readonly accuracy: number;
+  readonly maxCombo: number;
+  /** Prepares strike number `strike` (1-based) ahead of the ship at (`shipX`, `shipY`). */
+  start(shipX: number, shipY: number, strike: number, aspect: number): void;
+  tap(x: number, y: number, perfMs: number): void;
+  drag(x: number, y: number): void;
+  release(): void;
+  /** Cancels incoming fire (used when the player takes a hit). */
+  popOrbs(): void;
+  update(dt: number, frame: CockpitFrame): SectionStatus;
+  /** Results card text once cleared. */
+  result(): { title: string; stats: string };
+  /** Call when the simulation resumes after being frozen. */
+  resync(): void;
+  clear(): void;
+  dispose(): void;
 }
 
 export interface CockpitCallbacks {
@@ -207,7 +231,7 @@ const tmp2 = new Vector3();
  * Enemies that weren't hit fire back at the end of the phrase (draining the shield,
  * then lives) and warp away. Heavies stay and join the next call until destroyed.
  */
-export class CockpitSection {
+export class CockpitSection implements CockpitGame {
   private readonly fighters: Fighter[] = [];
   private readonly phrases: Phrase[] = [];
   private readonly volleys: Volley[] = [];
@@ -297,6 +321,14 @@ export class CockpitSection {
     this.shield = COCKPIT.shield;
     this.fallbackOrigin = performance.now();
     this.beat = this.rawBeat(performance.now());
+    this.overlay.setMode('rhythm');
+  }
+
+  result(): { title: string; stats: string } {
+    return {
+      title: this.accuracy >= 1 ? 'FLAWLESS STRIKE!' : 'STRIKE COMPLETE',
+      stats: `ACCURACY ${Math.round(this.accuracy * 100)}% · MAX COMBO ${this.maxCombo}`,
+    };
   }
 
   /** Handles a press at CSS pixel (`x`, `y`) at time `perfMs` (performance.now() time base). */

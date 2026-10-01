@@ -432,6 +432,12 @@ body {
 }
 
 /* Beat lane: notes scroll left toward the hit line; ticks mark each beat. */
+.cockpit.asteroids .cockpit-lane,
+.cockpit.asteroids .cockpit-phase,
+.cockpit.asteroids .cockpit-pulse {
+  display: none;
+}
+
 .cockpit-lane {
   position: absolute;
   left: 50%;

@@ -25,8 +25,9 @@ import { TutorialOverlay } from '../ui/Tutorial.ts';
 import { AlienBase, BASE_CLEARING, CORE_OFFSET, HANGAR_OFFSETS, SENTRY_OFFSETS } from './AlienBase.ts';
 import { CameraDirector } from './CameraDirector.ts';
 import { CockpitInterior } from './CockpitInterior.ts';
+import { AsteroidRun } from './AsteroidRun.ts';
 import { CockpitSection } from './CockpitSection.ts';
-import type { SectionStatus } from './CockpitSection.ts';
+import type { CockpitCallbacks, CockpitGame, SectionStatus } from './CockpitSection.ts';
 import {
   COCKPIT,
   WAVES,
@@ -171,7 +172,10 @@ export class ShooterScene implements GameScene {
   private readonly cockpitFill = new DirectionalLight(0xcfe0ff, 0);
   private readonly warp = new WarpField();
   private readonly interior = new CockpitInterior();
-  private readonly cockpit: CockpitSection;
+  private readonly rhythm: CockpitSection;
+  private readonly asteroids: AsteroidRun;
+  /** The first-person mini-game for the current (or last) strike. */
+  private cockpit: CockpitGame;
 
   private state: State = 'title';
   private stateTime = 0;
@@ -312,13 +316,16 @@ export class ShooterScene implements GameScene {
     this.scene.add(this.warp.object, this.interior.object, this.environment.object);
     cockpitOverlay.setInterior(this.interior.available);
 
-    this.cockpit = new CockpitSection(this.scene, this.effects, cockpitOverlay, audio.sfx, audio.music, {
+    const callbacks: CockpitCallbacks = {
       addScore: (points) => {
         this.score += points;
       },
       playerHit: () => this.damagePlayer(),
       blast: (position, strength) => this.blast(position, strength),
-    });
+    };
+    this.rhythm = new CockpitSection(this.scene, this.effects, cockpitOverlay, audio.sfx, audio.music, callbacks);
+    this.asteroids = new AsteroidRun(this.scene, this.effects, cockpitOverlay, audio.sfx, callbacks);
+    this.cockpit = this.rhythm;
     cockpitOverlay.setOpacity(0);
 
     this.enemyContext = {
@@ -534,6 +541,8 @@ export class ShooterScene implements GameScene {
     this.setMusicCutoff(450, COCKPIT.enterDuration * 0.8);
     const pf = this.playfield;
     const strike = this.spawner.wave / COCKPIT.everyWaves;
+    // Strikes alternate: rhythm fight first, then an asteroid field.
+    this.cockpit = strike % 2 === 0 ? this.asteroids : this.rhythm;
     this.cockpit.start(this.player.x, this.player.y, strike, pf.widthPx / pf.heightPx);
   }
 
@@ -869,7 +878,7 @@ export class ShooterScene implements GameScene {
 
   private startCockpitFight(): void {
     this.setPhase('cockpit');
-    if (this.cockpitTutorialDone) return;
+    if (this.cockpitTutorialDone || this.cockpit !== this.rhythm) return;
     this.cockpitTutorialDone = true;
     this.tutorial.showIfWanted('cockpit', () => this.input.consumeDrag(this.drag));
   }
@@ -892,6 +901,8 @@ export class ShooterScene implements GameScene {
       active: this.phase === 'cockpit',
       widthPx: pf.widthPx,
       heightPx: pf.heightPx,
+      drag: this.drag,
+      axis: this.input.axis,
     });
   }
 
@@ -901,12 +912,12 @@ export class ShooterScene implements GameScene {
     this.setPhase('sectionEnd');
     const accuracy = this.cockpit.accuracy;
     const combo = this.cockpit.maxCombo;
+    const { title, stats } = this.cockpit.result();
     const bonus =
       Math.round(COCKPIT.clearBonusPerWave * this.spawner.wave * accuracy) + combo * COCKPIT.maxComboBonus;
     this.score += bonus;
-    const title = accuracy >= 1 ? 'FLAWLESS STRIKE!' : 'STRIKE COMPLETE';
     this.cockpitOverlay.showCallout(
-      `${title}\nACCURACY ${Math.round(accuracy * 100)}% · MAX COMBO ${combo}\n+${bonus.toLocaleString('en-US')}`,
+      `${title}\n${stats}\n+${bonus.toLocaleString('en-US')}`,
       SECTION_END_PAUSE,
     );
     this.audio.sfx.squadronCleared();
@@ -978,7 +989,8 @@ export class ShooterScene implements GameScene {
     this.unsubscribeMove();
     this.unsubscribeRelease();
     this.clearWorld();
-    this.cockpit.dispose();
+    this.rhythm.dispose();
+    this.asteroids.dispose();
     this.warp.dispose();
     this.interior.dispose();
     this.starfield.dispose();

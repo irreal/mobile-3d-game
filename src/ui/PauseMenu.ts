@@ -179,7 +179,7 @@ function testRow(jump: (strike: number) => void): HTMLDivElement {
   const row = document.createElement('div');
   row.className = 'menu-row';
   const label = document.createElement('span');
-  label.textContent = 'Cockpit test';
+  label.textContent = 'Cockpit test (2, 4: asteroids)';
   row.append(label);
   for (let i = 1; i <= TEST_STRIKES; i++) {
     const b = menuButton(String(i), () => jump(i));

@@ -91,7 +91,7 @@ export class CockpitOverlay {
     timer.append(this.timerFill);
     this.callout = div('cockpit-callout');
     this.hint = div('cockpit-hint');
-    this.hint.textContent = 'WATCH THE SEQUENCE · THEN TAP IT BACK IN RHYTHM';
+    this.hint.textContent = HINTS.rhythm;
     this.flash = div('cockpit-flash');
     const popupLayer = div('cockpit-popups');
     for (let i = 0; i < POPUPS; i++) {
@@ -153,6 +153,12 @@ export class CockpitOverlay {
   setOpacity(opacity: number): void {
     this.root.style.opacity = String(opacity);
     this.root.style.visibility = opacity > 0.01 ? 'visible' : 'hidden';
+  }
+
+  /** Which mini-game the HUD is dressed for (the beat lane and phase pips are rhythm only). */
+  setMode(mode: 'rhythm' | 'asteroids'): void {
+    this.root.classList.toggle('asteroids', mode === 'asteroids');
+    this.hint.textContent = HINTS[mode];
   }
 
   setHintVisible(visible: boolean): void {
@@ -345,6 +351,11 @@ export class CockpitOverlay {
     this.root.classList.remove('booting', 'cue');
   }
 }
+
+const HINTS = {
+  rhythm: 'WATCH THE SEQUENCE · THEN TAP IT BACK IN RHYTHM',
+  asteroids: 'DRAG TO STEER · DODGE THE ROCKS · FLY THROUGH THE RINGS',
+};
 
 const BOOT_LINES = [
   'NOVA-7 FLIGHT SYSTEMS',
