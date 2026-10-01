@@ -1633,11 +1633,7 @@ export class ShooterScene implements GameScene {
       saveCoop(coopServerUrl(), false);
       return;
     }
-    let url = coopServerUrl();
-    if (!url) {
-      url = window.prompt('Co-op server address', 'https://coop.example.com:7443')?.trim() ?? '';
-      if (!url) return;
-    }
+    const url = coopServerUrl();
     saveCoop(url, true);
     this.coop.connect(url);
   }

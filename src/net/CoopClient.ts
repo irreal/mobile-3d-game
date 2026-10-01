@@ -267,15 +267,16 @@ function gatheringComplete(pc: RTCPeerConnection, timeoutMs: number): Promise<vo
 }
 
 const STORAGE_KEY = 'nova-strike:coop';
+export const DEFAULT_COOP_SERVER = 'https://novastrike.irreal.dev:7443';
 
-/** Server URL: `?coop=` in the page URL, then the saved one, then the build default. */
+/** Server URL: `?coop=` in the page URL, then the saved one, then the build override, then the default. */
 export function coopServerUrl(): string {
   const fromQuery = new URLSearchParams(location.search).get('coop');
   if (fromQuery) {
     saveCoop(fromQuery, true);
     return fromQuery;
   }
-  return loadCoop().url || (import.meta.env.VITE_COOP_SERVER as string | undefined) || '';
+  return loadCoop().url || (import.meta.env.VITE_COOP_SERVER as string | undefined) || DEFAULT_COOP_SERVER;
 }
 
 export function loadCoop(): { url: string; enabled: boolean } {

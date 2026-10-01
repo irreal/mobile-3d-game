@@ -12,7 +12,7 @@ Default ports: **7443/tcp** (signalling) and **47100/udp** (WebRTC). Both are se
 
 ## Setup
 
-1. DNS: add an `A` record such as `coop.example.com` pointing at the VPS. Set it to
+1. DNS: add an `A` record for `novastrike.irreal.dev` pointing at the VPS. Set it to
    **DNS only** (grey cloud): the UDP traffic goes straight to the IP, and Cloudflare
    doesn't proxy port 7443.
 2. Cloudflare API token: create one with *Zone → DNS → Edit* on that zone.
@@ -21,13 +21,13 @@ Default ports: **7443/tcp** (signalling) and **47100/udp** (WebRTC). Both are se
    While trying things out, `CERTBOT_STAGING=1` avoids Let's Encrypt rate limits. Delete the
    `letsencrypt` volume before switching to real certificates.
 5. `docker compose up -d --build`, then `docker compose logs -f`. The proxy waits until
-   the certificate exists. To check: `curl https://coop.example.com:7443/healthz`.
+   the certificate exists. To check: `curl https://novastrike.irreal.dev:7443/healthz`.
 
 ## Playing
 
-Open the game with `?coop=https://coop.example.com:7443` once (it's remembered), or press
-*Co-op* in the pause menu and enter the address. For a build that connects by default, set
-`VITE_COOP_SERVER` when building the client.
+Press *Co-op* in the pause menu; the game connects to `https://novastrike.irreal.dev:7443` by
+default and reconnects to it on later visits. To use another server, open the game once with
+`?coop=https://host:port` (remembered) or set `VITE_COOP_SERVER` when building the client.
 
 Every connected player shares one instance for now: you see each other's ships, guns and
 fire, but each player's enemies are still their own.
